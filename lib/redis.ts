@@ -5,7 +5,8 @@ export class RedisNietGeconfigureerd extends Error {
   constructor() {
     super(
       'Redis is niet geconfigureerd. Zet UPSTASH_REDIS_REST_URL en UPSTASH_REDIS_REST_TOKEN ' +
-        'in .env.local (lokaal) of in de Vercel-projectinstellingen.'
+        '(of KV_REST_API_URL en KV_REST_API_TOKEN) in .env.local (lokaal) of in de ' +
+        'Vercel-projectinstellingen. Vergeet daarna niet opnieuw te deployen.'
     );
     this.name = 'RedisNietGeconfigureerd';
   }
@@ -16,8 +17,10 @@ let client: Redis | null = null;
 export function getRedis(): Redis {
   if (client) return client;
 
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  // Vercel noemt de Upstash-variabelen afhankelijk van de integratie
+  // UPSTASH_REDIS_REST_* of KV_REST_API_*. Beide worden geaccepteerd.
+  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
   if (!url || !token) throw new RedisNietGeconfigureerd();
 
   client = new Redis({ url, token });

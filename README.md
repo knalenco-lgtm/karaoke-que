@@ -78,8 +78,8 @@ BASE_URL=http://localhost:3000 HOST_PIN=4821 npm run test:api
 
 | Variabele | Waarvoor |
 | --- | --- |
-| `UPSTASH_REDIS_REST_URL` | Upstash Redis REST-endpoint |
-| `UPSTASH_REDIS_REST_TOKEN` | Bijbehorend token |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis REST-endpoint (`KV_REST_API_URL` werkt ook) |
+| `UPSTASH_REDIS_REST_TOKEN` | Bijbehorend token (`KV_REST_API_TOKEN` werkt ook) |
 | `HOST_PIN` | Pincode voor `/host` |
 
 Ontbreken ze, dan geeft de app een duidelijke melding in plaats van een cryptische stacktrace.
@@ -90,9 +90,12 @@ Ontbreken ze, dan geeft de app een duidelijke melding in plaats van een cryptisc
 2. **Vercel** — vercel.com → *Add New Project* → importeer de repo. Next.js wordt automatisch
    herkend; `npm run build` draait ook `prepare-catalog`.
 3. **Upstash Redis** — in je Vercel-project → tab *Storage* → *Create Database* → Upstash Redis.
-   `UPSTASH_REDIS_REST_URL` en `UPSTASH_REDIS_REST_TOKEN` worden automatisch gekoppeld.
+   De env vars worden automatisch gekoppeld; afhankelijk van de integratie heten ze
+   `UPSTASH_REDIS_REST_*` of `KV_REST_API_*`. De app accepteert allebei.
 4. **Pincode** — Settings → Environment Variables → `HOST_PIN` toevoegen (bijv. `4821`).
-5. **Deploy** — je krijgt een URL zoals `https://karaoke-kenneth.vercel.app`.
+5. **Deploy** — gebruik de **productie-URL** (`https://<project>.vercel.app`), niet de
+   deployment-URL met een hash erin: die laatste zit achter Vercel-login en verandert bij
+   elke deploy.
 6. **Testen** — open de URL op twee telefoons, vraag een nummer aan, stem, en check `/host`.
 7. **QR-code** — ga naar `/qr` en download de PNG, of maak er een op
    https://www.qrcode-monkey.com.
