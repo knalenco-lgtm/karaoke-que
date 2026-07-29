@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-neon: #f0abfc;
+  --color-neon-2: #22d3ee;
+  --color-limoen: #a3e635;
+
+  --font-sans: var(--font-outfit), system-ui, sans-serif;
+}
+
+html {
+  background: #0a0510;
+  color-scheme: dark;
+}
+
+body {
+  color: #f5f3ff;
+  background:
+    radial-gradient(1100px 700px at 15% -10%, #4c1d95 0%, transparent 55%),
+    radial-gradient(900px 600px at 90% 5%, #831843 0%, transparent 50%),
+    radial-gradient(800px 900px at 50% 110%, #164e63 0%, transparent 55%),
+    #0a0510;
+  background-attachment: fixed;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Glazen kaart — de basisvorm voor alle rijen en panelen. */
+@utility kaart {
+  background: color-mix(in oklab, #1b0b2e 78%, transparent);
+  border: 1px solid color-mix(in oklab, #f0abfc 14%, transparent);
+  border-radius: 1rem;
+  backdrop-filter: blur(8px);
+}
+
+/* Neonrand voor het nummer dat aan de beurt is. */
+@utility gloed {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, #f0abfc 45%, transparent),
+    0 0 28px color-mix(in oklab, #d946ef 35%, transparent);
+}
+
+@keyframes puls-zacht {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.puls {
+  animation: puls-zacht 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .puls {
+    animation: none;
+  }
+}
