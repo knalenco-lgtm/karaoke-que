@@ -4,8 +4,10 @@ Wachtrij-app voor een karaokefeestje. Gasten scannen een QR-code, zoeken een num
 échte KaraFun-catalogus, vragen het aan en stemmen op elkaars nummers. De host heeft een
 eigen pagina met pincode om de rij af te werken.
 
-- **Gastenpagina** `/` — naam invullen, nummer zoeken, aanvragen, stemmen, eigen aanvraag intrekken
-- **Hostpagina** `/host` — afvinken, skippen, verwijderen, gepauzeerde aanvragen herstellen
+- **Gastenpagina** `/` — naam invullen, nummer zoeken, aanvragen (alleen of als duet/trio),
+  stemmen, eigen aanvraag intrekken
+- **Hostpagina** `/host` — afvinken, skippen, verwijderen, gepauzeerde aanvragen herstellen,
+  verrassingskeuze trekken
 - **QR-pagina** `/qr` — QR-code van de eigen URL, met downloadknop
 
 Stack: Next.js (App Router) + TypeScript + Tailwind, Upstash Redis als datastore, live updates
@@ -65,8 +67,9 @@ npm run test:api
 ```
 
 Start een fake-Upstash plus een dev-server, speelt een compleet feestscenario af (aanvragen,
-dubbele nummers, stemlimieten, host-acties, en een check-in die verloopt door de klok terug te
-zetten) en ruimt daarna alles op. 46 checks, geen Upstash-account nodig.
+dubbele nummers, duetten, stemlimieten, host-acties, een check-in die verloopt door de klok
+terug te zetten, en een verrassingskeuze uit een rij van 30+) en ruimt daarna alles op.
+71 checks, geen Upstash-account nodig.
 
 Tegen een al draaiende server met echte Redis:
 
@@ -106,8 +109,12 @@ Ontbreken ze, dan geeft de app een duidelijke melding in plaats van een cryptisc
 
 ## Spelregels
 
-**Sortering** — minst geskipt → meeste stemmen → wie het eerst aanvroeg. Bij gelijke stand
-staat degene die het eerst aanvroeg dus bovenaan.
+**Sortering** — verrassingskeuze → minst geskipt → meeste stemmen → wie het eerst aanvroeg.
+Bij gelijke stand staat degene die het eerst aanvroeg dus bovenaan.
+
+**Duetten** — bij het aanvragen kun je maximaal 2 extra zangers toevoegen (samen dus 3). Die
+namen zijn puur weergave: alleen de aanvrager hangt aan het apparaat en kan intrekken of de
+check-in bevestigen. In de lijst staat er dan "Kenneth + Lisa + Tom".
 
 **Stemmen** — één stem per telefoon per aanvraag, server-side afgedwongen met een Redis-set.
 Stemmen op je eigen aanvraag kan niet, intrekken van een stem ook niet.
@@ -121,8 +128,20 @@ niet op #1 of #2 staat, verschijnt elk kwartier een modal op je eigen pagina, me
 browsermelding en een knipperende tab-titel. Bevestig je niet binnen 5 minuten, dan wordt je
 nummer gepauzeerd: het verdwijnt uit de actieve rij en komt in een grijs blokje met
 "Ik ben er weer!" (stemmen blijven staan, de aanvraagtijd gaat opnieuw in). Mis je het een
-tweede keer, dan vervalt de aanvraag definitief. De host ziet gepauzeerde aanvragen ook en
-kan ze terugzetten.
+tweede keer, dan vervalt de aanvraag definitief. Naast de JA-knop zit "Nee, haal ons maar uit
+de lijst": daarmee verdwijnt de aanvraag meteen. De host ziet gepauzeerde aanvragen ook en kan
+ze terugzetten.
+
+**Meldingen** — na de eerste geslaagde aanvraag legt de app uit waarvoor meldingen dienen en
+vraagt pas daarna toestemming; een prompt uit het niets wordt vrijwel altijd weggeklikt. Een
+statusregel op de gastenpagina laat zien of ze aan of uit staan. Staan ze aan, dan krijg je
+een melding als je nummer op #2 komt, als je aan de beurt bent, en bij elke check-in.
+
+**Verrassingskeuze** — vanaf 30 nummers in de rij kan de host op "🎲 Verrassing" drukken.
+Die trekt willekeurig een aanvraag van buiten de top 5 (daar is echt op gestemd) en zet hem op
+#1, zonder één stem te verplaatsen: het gekozen nummer krijgt een vlag die in de sortering
+vóór alles gaat. Zolang het bovenaan staat ziet iedereen "🎲 verrassingskeuze". Skipt de host
+het alsnog, dan vervalt de vlag.
 
 Dit alles wordt server-side berekend bij elke queue-read, dus er is geen cron of achtergrondtaak
 nodig.
@@ -131,7 +150,7 @@ nodig.
 
 | Sleutel | Type | Inhoud |
 | --- | --- | --- |
-| `req:{id}` | hash | `songId`, `titel`, `artiest`, `zangerNaam`, `deviceId`, `createdAt`, `status`, `lastConfirmedAt`, `missedCheckins`, `skips` |
+| `req:{id}` | hash | `songId`, `titel`, `artiest`, `zangerNaam`, `extraSingers`, `deviceId`, `createdAt`, `status`, `lastConfirmedAt`, `missedCheckins`, `skips`, `verrassingOp` |
 | `live` | set | ids van aanvragen die nog leven (`queued` of `paused`) |
 | `votes:{id}` | set | deviceIds die op deze aanvraag gestemd hebben |
 | `device:{deviceId}:requests` | set | openstaande aanvragen van dit apparaat |
@@ -139,6 +158,10 @@ nodig.
 
 `status` is `queued`, `paused`, `done` of `removed`. Afgeronde en verwijderde aanvragen houden
 nog 24 uur een TTL en verdwijnen daarna vanzelf.
+
+`extraSingers` is een JSON-lijst met maximaal 2 namen en `verrassingOp` een epoch-ms of 0.
+Aanvragen die zonder die velden zijn weggeschreven blijven werken: ze worden gelezen als een
+lege lijst en 0.
 
 `GET /api/queue?deviceId=…` geeft in één response de gesorteerde rij, wie er nu aan de beurt is,
 de gepauzeerde aanvragen en de check-in-status voor dat apparaat.

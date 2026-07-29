@@ -8,6 +8,8 @@ export interface KaraokeRequest {
   titel: string;
   artiest: string;
   zangerNaam: string;
+  /** Extra zangers naast de aanvrager (duet/trio). Puur weergave. */
+  extraSingers: string[];
   deviceId: string;
   createdAt: number;
   status: RequestStatus;
@@ -15,6 +17,8 @@ export interface KaraokeRequest {
   missedCheckins: number;
   /** Hoe vaak de host dit nummer naar onderen heeft geskipt. */
   skips: number;
+  /** Tijdstip waarop de host dit nummer als verrassing naar voren trok (0 = nooit). */
+  verrassingOp: number;
 }
 
 /** Zoals de client hem ziet, verrijkt met stemmen en device-context. */
@@ -24,11 +28,17 @@ export interface QueueEntry {
   titel: string;
   artiest: string;
   zangerNaam: string;
+  extraSingers: string[];
   createdAt: number;
   status: RequestStatus;
   stemmen: number;
   skips: number;
   missedCheckins: number;
+  /**
+   * Tijdstip waarop de host dit nummer als verrassing naar voren trok (0 = nooit).
+   * Bepaalt de sortering én of het "🎲 verrassingskeuze"-label getoond wordt.
+   */
+  verrassingOp: number;
   /** Is deze aanvraag van het opvragende device? */
   isMijn: boolean;
   /** Heeft het opvragende device al gestemd? */

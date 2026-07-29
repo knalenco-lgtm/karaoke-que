@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     const resultaat = await maakAanvraag({
       songId: tekst(body.songId),
       zangerNaam: tekst(body.zangerNaam),
+      extraSingers: body.extraSingers,
       deviceId: tekst(body.deviceId),
     });
     return NextResponse.json({ ok: true, ...resultaat });

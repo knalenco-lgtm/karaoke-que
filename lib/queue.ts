@@ -6,7 +6,12 @@ import {
   CHECKIN_RESPIJT_MS,
   CHECKIN_VRIJE_POSITIES,
   MAX_AANVRAGEN_PER_DEVICE,
+  MAX_EXTRA_ZANGER_LENGTE,
+  MAX_EXTRA_ZANGERS,
   MAX_GEMISTE_CHECKINS,
+  MAX_ZANGER_LENGTE,
+  VERRASSING_BESCHERMDE_TOP,
+  VERRASSING_MIN_RIJ,
 } from './constants';
 
 /** Bewaartermijn van afgeronde/verwijderde aanvragen (alleen nog voor debug). */
@@ -32,6 +37,28 @@ export class QueueError extends Error {
  * Upstash parst hash-waarden automatisch als JSON, dus een titel als "1985"
  * komt terug als number. Alles wordt daarom expliciet teruggedwongen.
  */
+/**
+ * Leest het veld `extraSingers`. Upstash geeft het terug als array (auto-parse)
+ * of als JSON-string; aanvragen van vóór de duet-functie hebben het veld niet.
+ * In alle drie de gevallen moet er gewoon een lijst uit komen.
+ */
+function parseExtraSingers(ruw: unknown): string[] {
+  let waarde = ruw;
+  if (typeof waarde === 'string') {
+    if (!waarde.trim()) return [];
+    try {
+      waarde = JSON.parse(waarde);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(waarde)) return [];
+  return waarde
+    .map((naam) => String(naam ?? '').trim())
+    .filter(Boolean)
+    .slice(0, MAX_EXTRA_ZANGERS);
+}
+
 function parseRequest(id: string, raw: Record<string, unknown> | null): KaraokeRequest | null {
   if (!raw || Object.keys(raw).length === 0) return null;
   const status = String(raw.status ?? '') as RequestStatus;
@@ -43,22 +70,29 @@ function parseRequest(id: string, raw: Record<string, unknown> | null): KaraokeR
     titel: String(raw.titel ?? ''),
     artiest: String(raw.artiest ?? ''),
     zangerNaam: String(raw.zangerNaam ?? ''),
+    extraSingers: parseExtraSingers(raw.extraSingers),
     deviceId: String(raw.deviceId ?? ''),
     createdAt: Number(raw.createdAt ?? 0),
     status,
     lastConfirmedAt: Number(raw.lastConfirmedAt ?? raw.createdAt ?? 0),
     missedCheckins: Number(raw.missedCheckins ?? 0),
     skips: Number(raw.skips ?? 0),
+    verrassingOp: Number(raw.verrassingOp ?? 0),
   };
 }
 
 /**
  * Sorteervolgorde van de wachtrij:
- *  1. minst geskipt (door de host naar onderen gezet blijft onderaan)
- *  2. meeste stemmen
- *  3. wie het eerst aanvroeg
+ *  1. verrassingskeuze van de host (de meest recente eerst)
+ *  2. minst geskipt (door de host naar onderen gezet blijft onderaan)
+ *  3. meeste stemmen
+ *  4. wie het eerst aanvroeg
+ *
+ * De verrassing staat bewust bovenaan de sleutel: zo komt hij op #1 zonder dat
+ * er ook maar één stem verplaatst hoeft te worden.
  */
 function sorteer(a: QueueEntry, b: QueueEntry): number {
+  if (a.verrassingOp !== b.verrassingOp) return b.verrassingOp - a.verrassingOp;
   if (a.skips !== b.skips) return a.skips - b.skips;
   if (a.stemmen !== b.stemmen) return b.stemmen - a.stemmen;
   return a.createdAt - b.createdAt;
@@ -114,11 +148,13 @@ function naarEntry(item: LiveRequest, deviceId: string | null): QueueEntry {
     titel: item.request.titel,
     artiest: item.request.artiest,
     zangerNaam: item.request.zangerNaam,
+    extraSingers: item.request.extraSingers,
     createdAt: item.request.createdAt,
     status: item.request.status,
     stemmen: item.stemmen,
     skips: item.request.skips,
     missedCheckins: item.request.missedCheckins,
+    verrassingOp: item.request.verrassingOp,
     isMijn,
     heeftGestemd: deviceId !== null && item.stemmers.includes(deviceId),
     magStemmen: deviceId !== null && !isMijn && !item.stemmers.includes(deviceId),
@@ -299,16 +335,44 @@ export async function leesWachtrij(deviceId: string | null): Promise<QueueRespon
   };
 }
 
+/**
+ * Schoont de extra zangers op: lege namen eruit, elk afgekapt op de maximale
+ * lengte, en niet meer dan er mogen. De namen zijn puur weergave — alleen de
+ * aanvrager is aan het device gekoppeld en kan intrekken of bevestigen.
+ */
+function normaliseerExtraZangers(ruw: unknown): string[] {
+  if (ruw === undefined || ruw === null) return [];
+  if (!Array.isArray(ruw)) {
+    throw new QueueError('Ongeldige lijst met extra zangers.');
+  }
+
+  const namen = ruw
+    .map((naam) => String(naam ?? '').trim().slice(0, MAX_EXTRA_ZANGER_LENGTE))
+    .filter(Boolean);
+
+  if (namen.length > MAX_EXTRA_ZANGERS) {
+    throw new QueueError(
+      `Maximaal ${MAX_EXTRA_ZANGERS + 1} zangers per nummer.`,
+      400,
+      'TE_VEEL_ZANGERS'
+    );
+  }
+  return namen;
+}
+
 export async function maakAanvraag(input: {
   songId: string;
   zangerNaam: string;
+  extraSingers?: unknown;
   deviceId: string;
 }): Promise<{ id: string }> {
   const redis = getRedis();
 
-  const zangerNaam = input.zangerNaam.trim().slice(0, 40);
+  const zangerNaam = input.zangerNaam.trim().slice(0, MAX_ZANGER_LENGTE);
   if (zangerNaam.length < 1) throw new QueueError('Vul eerst je naam in.');
   if (!input.deviceId) throw new QueueError('Onbekend apparaat — herlaad de pagina.');
+
+  const extraSingers = normaliseerExtraZangers(input.extraSingers);
 
   // Alleen nummers uit de KaraFun-catalogus: vrije invoer bestaat niet.
   const song = getSongById(input.songId);
@@ -340,12 +404,14 @@ export async function maakAanvraag(input: {
     titel: song.titel,
     artiest: song.artiest,
     zangerNaam,
+    extraSingers: JSON.stringify(extraSingers),
     deviceId: input.deviceId,
     createdAt: nu,
     status: 'queued',
     lastConfirmedAt: nu,
     missedCheckins: 0,
     skips: 0,
+    verrassingOp: 0,
   });
   await Promise.all([
     redis.sadd(KEYS.live, id),
@@ -419,6 +485,8 @@ export async function hervat(requestId: string, deviceId: string | null): Promis
     status: 'queued',
     createdAt: nu,
     lastConfirmedAt: nu,
+    // Wie even weg was begint achteraan de verrassingsloting, niet op #1.
+    verrassingOp: 0,
   });
   await redis.sadd(KEYS.live, requestId);
   vergeetSnapshot();
@@ -452,8 +520,47 @@ export async function hostSkip(requestId: string): Promise<void> {
     skips: request.skips + 1,
     createdAt: nu,
     lastConfirmedAt: nu,
+    // Naar onderen betekent naar onderen: een eerdere verrassingskeuze vervalt,
+    // anders springt het nummer meteen weer naar #1.
+    verrassingOp: 0,
   });
   vergeetSnapshot();
+}
+
+/**
+ * Trekt een willekeurig nummer van buiten de beschermde top naar positie 1.
+ * Bedoeld voor een volle lijst, zodat de onderkant ook een kans maakt. Raakt
+ * geen enkele stem aan: alleen het gekozen nummer krijgt een vlag die in de
+ * sortering vóór alles gaat.
+ */
+export async function hostVerrassing(): Promise<{ id: string; titel: string; positie: number }> {
+  vergeetSnapshot();
+  const { wachtrij } = await leesWachtrij(null);
+
+  if (wachtrij.length < VERRASSING_MIN_RIJ) {
+    throw new QueueError(
+      `De verrassingskeuze kan pas vanaf ${VERRASSING_MIN_RIJ} nummers in de rij (nu ${wachtrij.length}).`,
+      409,
+      'TE_KORT'
+    );
+  }
+
+  const kandidaten = wachtrij.slice(VERRASSING_BESCHERMDE_TOP);
+  if (kandidaten.length === 0) {
+    throw new QueueError('Geen nummers buiten de top om uit te kiezen.', 409);
+  }
+
+  const index = Math.floor(Math.random() * kandidaten.length);
+  const gekozen = kandidaten[index];
+
+  await getRedis().hset(KEYS.request(gekozen.id), { verrassingOp: Date.now() });
+  vergeetSnapshot();
+
+  return {
+    id: gekozen.id,
+    titel: gekozen.titel,
+    positie: VERRASSING_BESCHERMDE_TOP + index + 1,
+  };
 }
 
 export async function hostVerwijder(requestId: string): Promise<void> {

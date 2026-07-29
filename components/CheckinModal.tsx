@@ -9,6 +9,8 @@ interface Props {
   /** Verschil tussen serverklok en clientklok, in ms. */
   klokverschil: number;
   onBevestig: () => Promise<void>;
+  /** Haalt de aanvraag meteen definitief uit de lijst. */
+  onAfmelden: () => Promise<void>;
 }
 
 function resterend(ms: number): string {
@@ -16,8 +18,8 @@ function resterend(ms: number): string {
   return `${Math.floor(totaal / 60)}:${String(totaal % 60).padStart(2, '0')}`;
 }
 
-export function CheckinModal({ checkin, klokverschil, onBevestig }: Props) {
-  const [bezig, setBezig] = useState(false);
+export function CheckinModal({ checkin, klokverschil, onBevestig, onAfmelden }: Props) {
+  const [bezig, setBezig] = useState<'ja' | 'nee' | null>(null);
   const [tijd, setTijd] = useState(() => checkin.vervaltOp - (Date.now() + klokverschil));
 
   useAandacht(
@@ -61,18 +63,35 @@ export function CheckinModal({ checkin, klokverschil, onBevestig }: Props) {
         <button
           type="button"
           onClick={async () => {
-            setBezig(true);
+            setBezig('ja');
             try {
               await onBevestig();
             } finally {
-              setBezig(false);
+              setBezig(null);
             }
           }}
-          disabled={bezig}
+          disabled={bezig !== null}
           className="mt-6 min-h-16 w-full rounded-2xl bg-lime-400 text-xl font-black tracking-wide
                      text-black active:bg-lime-500 disabled:opacity-50"
         >
-          {bezig ? 'Bezig…' : 'JA, IK BEN ER!'}
+          {bezig === 'ja' ? 'Bezig…' : 'JA, IK BEN ER!'}
+        </button>
+
+        <button
+          type="button"
+          onClick={async () => {
+            setBezig('nee');
+            try {
+              await onAfmelden();
+            } finally {
+              setBezig(null);
+            }
+          }}
+          disabled={bezig !== null}
+          className="mt-3 min-h-12 w-full rounded-xl border border-white/15 text-sm font-medium
+                     text-fuchsia-100/70 active:bg-white/10 disabled:opacity-50"
+        >
+          {bezig === 'nee' ? 'Bezig…' : 'Nee, haal ons maar uit de lijst'}
         </button>
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import type { QueueEntry } from '@/lib/types';
+import { zangersTekst } from '@/lib/zangers';
 
 interface Props {
   entry: QueueEntry;
@@ -32,12 +33,17 @@ export function QueueRow({ entry, positie, aanDeBeurt, acties, onderActies }: Pr
         </span>
 
         <div className="min-w-0 flex-1">
+          {aanDeBeurt && entry.verrassingOp > 0 && (
+            <p className="mb-0.5 text-xs font-bold tracking-wide text-limoen">
+              🎲 verrassingskeuze
+            </p>
+          )}
           <p className="truncate leading-tight font-semibold">{entry.titel}</p>
           <p className="truncate text-sm text-fuchsia-200/60">{entry.artiest}</p>
           <p className="mt-0.5 truncate text-sm">
             <span className="text-fuchsia-200/50">door </span>
             <span className={entry.isMijn ? 'font-semibold text-neon' : 'text-fuchsia-100/90'}>
-              {entry.zangerNaam}
+              {zangersTekst(entry.zangerNaam, entry.extraSingers)}
               {entry.isMijn && ' (jij)'}
             </span>
           </p>

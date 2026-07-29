@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { QueueRow } from '@/components/QueueRow';
 import { useQueue } from '@/components/useQueue';
 import { api, ApiFout, getPin, setPin, wisPin } from '@/lib/client';
+import { VERRASSING_BESCHERMDE_TOP, VERRASSING_MIN_RIJ } from '@/lib/constants';
+import { zangersTekst } from '@/lib/zangers';
 
 export default function HostPagina() {
   const [pin, setPinState] = useState<string | null>(null);
@@ -27,13 +29,23 @@ export default function HostPagina() {
 function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void }) {
   const { data, fout, ververs } = useQueue(null);
   const [bezigId, setBezigId] = useState<string | null>(null);
-  const [melding, setMelding] = useState<string | null>(null);
+  const [melding, setMelding] = useState<{ tekst: string; fout: boolean } | null>(null);
 
-  async function hostActie(actie: string, requestId: string) {
-    setBezigId(requestId + actie);
+  async function hostActie(actie: string, requestId?: string) {
+    setBezigId((requestId ?? '') + actie);
     setMelding(null);
     try {
-      await api('/api/host', { method: 'POST', body: { actie, requestId }, pin });
+      const res = await api<{ verrassing?: { titel: string; positie: number } }>('/api/host', {
+        method: 'POST',
+        body: { actie, requestId },
+        pin,
+      });
+      if (res.verrassing) {
+        setMelding({
+          tekst: `🎲 "${res.verrassing.titel}" stond op #${res.verrassing.positie} en is nu aan de beurt.`,
+          fout: false,
+        });
+      }
       await ververs();
     } catch (error) {
       if (error instanceof ApiFout && error.code === 'PIN') {
@@ -41,11 +53,17 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
         onUitloggen();
         return;
       }
-      setMelding(error instanceof ApiFout ? error.message : 'Actie mislukt.');
+      setMelding({
+        tekst: error instanceof ApiFout ? error.message : 'Actie mislukt.',
+        fout: true,
+      });
     } finally {
       setBezigId(null);
     }
   }
+
+  const rijLengte = data?.wachtrij.length ?? 0;
+  const magVerrassen = rijLengte >= VERRASSING_MIN_RIJ;
 
   const knop =
     'min-h-11 flex-1 rounded-lg border text-sm font-semibold disabled:opacity-40 px-2';
@@ -69,8 +87,14 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
       </header>
 
       {melding && (
-        <p className="mb-4 rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-          {melding}
+        <p
+          className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
+            melding.fout
+              ? 'border-rose-400/30 bg-rose-500/10 text-rose-200'
+              : 'border-lime-400/30 bg-lime-400/10 text-lime-100'
+          }`}
+        >
+          {melding.tekst}
         </p>
       )}
       {fout && (
@@ -78,6 +102,25 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
           {fout}
         </p>
       )}
+
+      <button
+        type="button"
+        onClick={() => hostActie('verrassing')}
+        disabled={!magVerrassen || bezigId === 'verrassing'}
+        title={
+          magVerrassen
+            ? `Trekt willekeurig een nummer van buiten de top ${VERRASSING_BESCHERMDE_TOP} naar voren`
+            : `vanaf ${VERRASSING_MIN_RIJ} nummers`
+        }
+        className="mb-4 min-h-14 w-full rounded-xl border border-limoen/50 bg-limoen/10 text-base
+                   font-bold text-limoen active:bg-limoen/25 disabled:border-white/10
+                   disabled:bg-transparent disabled:text-fuchsia-200/40"
+      >
+        {bezigId === 'verrassing' ? 'Bezig…' : '🎲 Verrassing'}
+        {!magVerrassen && (
+          <span className="ml-2 text-xs font-normal">(vanaf {VERRASSING_MIN_RIJ} nummers)</span>
+        )}
+      </button>
 
       {data && data.wachtrij.length === 0 && (
         <p className="kaart px-4 py-6 text-center text-sm text-fuchsia-200/60">
@@ -144,7 +187,8 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
               <li key={entry.id} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                 <p className="truncate font-semibold text-fuchsia-100/70">{entry.titel}</p>
                 <p className="truncate text-sm text-fuchsia-200/40">
-                  {entry.artiest} · door {entry.zangerNaam} · {entry.stemmen} stemmen
+                  {entry.artiest} · door {zangersTekst(entry.zangerNaam, entry.extraSingers)} ·{' '}
+                  {entry.stemmen} stemmen
                 </p>
                 <div className="mt-3 flex gap-2">
                   <button
@@ -171,7 +215,7 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
       )}
 
       <p className="mt-10 text-center text-xs text-fuchsia-200/40">
-        Sortering: minst geskipt → meeste stemmen → wie het eerst aanvroeg
+        Sortering: verrassingskeuze → minst geskipt → meeste stemmen → wie het eerst aanvroeg
       </p>
     </main>
   );

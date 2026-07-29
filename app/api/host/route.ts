@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
-import { hostHerstel, hostSkip, hostVerwijder, hostVolgende, QueueError } from '@/lib/queue';
+import {
+  hostHerstel,
+  hostSkip,
+  hostVerrassing,
+  hostVerwijder,
+  hostVolgende,
+  QueueError,
+} from '@/lib/queue';
 import { foutRespons, leesBody, tekst } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -43,6 +50,8 @@ export async function POST(request: Request) {
       case 'herstel':
         await hostHerstel(requestId);
         break;
+      case 'verrassing':
+        return NextResponse.json({ ok: true, verrassing: await hostVerrassing() });
       default:
         throw new QueueError(`Onbekende actie: ${actie || '(leeg)'}`);
     }

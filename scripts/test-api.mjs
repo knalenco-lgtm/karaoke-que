@@ -18,8 +18,13 @@ const APP_POORT = 3111;
 const BASE = process.env.BASE_URL ?? `http://127.0.0.1:${APP_POORT}`;
 const PIN = process.env.HOST_PIN ?? '4821';
 
+// Spiegelt lib/constants.ts — een .mjs-script kan geen TypeScript importeren.
+const VERRASSING_MIN_RIJ = 30;
+const VERRASSING_BESCHERMDE_TOP = 5;
+
 const DEVICE_A = 'test-device-a';
 const DEVICE_B = 'test-device-b';
+const DEVICE_C = 'test-device-c';
 
 let geslaagd = 0;
 let gefaald = 0;
@@ -315,6 +320,118 @@ async function testen() {
   check('wachtrij is weer leeg', leeg.data?.wachtrij?.length === 0);
   check('er is niemand aan de beurt', leeg.data?.nuAanDeBeurt === null);
 
+  // --- Duetten -------------------------------------------------------------
+  console.log('\nDuetten');
+  const duetSongs = (await api('/api/songs?q=dancing')).data.resultaten;
+
+  const duet = await api('/api/request', {
+    method: 'POST',
+    body: {
+      songId: duetSongs[0].id,
+      zangerNaam: 'Kenneth',
+      extraSingers: ['Lisa', 'Tom'],
+      deviceId: DEVICE_A,
+    },
+  });
+  check('aanvraag met twee extra zangers lukt', duet.status === 200, JSON.stringify(duet.data));
+
+  const naDuet = await api('/api/queue');
+  const duetEntry = naDuet.data?.wachtrij?.find((e) => e.id === duet.data?.id);
+  check(
+    'extra zangers komen terug in de wachtrij',
+    JSON.stringify(duetEntry?.extraSingers) === JSON.stringify(['Lisa', 'Tom']),
+    JSON.stringify(duetEntry?.extraSingers)
+  );
+
+  const teVeel = await api('/api/request', {
+    method: 'POST',
+    body: {
+      songId: duetSongs[1].id,
+      zangerNaam: 'Bram',
+      extraSingers: ['Een', 'Twee', 'Drie'],
+      deviceId: DEVICE_B,
+    },
+  });
+  check(
+    'meer dan drie zangers wordt geweigerd',
+    teVeel.status === 400 && teVeel.data?.code === 'TE_VEEL_ZANGERS',
+    JSON.stringify(teVeel.data)
+  );
+
+  const rommel = await api('/api/request', {
+    method: 'POST',
+    body: {
+      songId: duetSongs[1].id,
+      zangerNaam: 'Bram',
+      extraSingers: ['   ', 'x'.repeat(50)],
+      deviceId: DEVICE_B,
+    },
+  });
+  check('lege naam valt weg, te lange naam wordt afgekapt', rommel.status === 200);
+  const rommelEntry = (await api('/api/queue')).data?.wachtrij?.find(
+    (e) => e.id === rommel.data?.id
+  );
+  check(
+    '...precies één extra zanger over, van 30 tekens',
+    rommelEntry?.extraSingers?.length === 1 && rommelEntry.extraSingers[0].length === 30,
+    JSON.stringify(rommelEntry?.extraSingers)
+  );
+
+  const solo = await api('/api/request', {
+    method: 'POST',
+    body: { songId: duetSongs[2].id, zangerNaam: 'Cato', deviceId: DEVICE_C },
+  });
+  check('aanvraag zonder extra zangers blijft werken', solo.status === 200);
+  const soloEntry = (await api('/api/queue')).data?.wachtrij?.find((e) => e.id === solo.data?.id);
+  check(
+    '...en levert een lege lijst extra zangers op',
+    Array.isArray(soloEntry?.extraSingers) && soloEntry.extraSingers.length === 0
+  );
+
+  if (!EXTERN) {
+    // Een aanvraag zoals die vóór de duet-functie werd weggeschreven: zonder
+    // extraSingers en zonder verrassingOp. Die moet gewoon blijven werken.
+    const toen = String(Date.now());
+    await redisCmd([
+      'hset', 'req:legacy-1',
+      'songId', duetSongs[3].id,
+      'titel', 'Oud Nummer',
+      'artiest', 'Van Vroeger',
+      'zangerNaam', 'Oma',
+      'deviceId', 'dev-legacy',
+      'createdAt', toen,
+      'status', 'queued',
+      'lastConfirmedAt', toen,
+      'missedCheckins', '0',
+      'skips', '0',
+    ]);
+    await redisCmd(['sadd', 'live', 'legacy-1']);
+    await wacht(3200);
+
+    const legacyEntry = (await api('/api/queue')).data?.wachtrij?.find((e) => e.id === 'legacy-1');
+    check(
+      'aanvraag van vóór deze uitbreiding blijft werken',
+      legacyEntry !== undefined &&
+        Array.isArray(legacyEntry.extraSingers) &&
+        legacyEntry.extraSingers.length === 0 &&
+        legacyEntry.verrassingOp === 0,
+      JSON.stringify(legacyEntry)
+    );
+    await api('/api/request', {
+      method: 'DELETE',
+      body: { requestId: 'legacy-1', deviceId: 'dev-legacy' },
+    });
+  }
+
+  for (const [id, device] of [
+    [duet.data?.id, DEVICE_A],
+    [rommel.data?.id, DEVICE_B],
+    [solo.data?.id, DEVICE_C],
+  ]) {
+    await api('/api/request', { method: 'DELETE', body: { requestId: id, deviceId: device } });
+  }
+  check('wachtrij is na het opruimen weer leeg', (await api('/api/queue')).data?.wachtrij?.length === 0);
+
   // --- Check-in die verloopt ----------------------------------------------
   // Vereist directe toegang tot de datastore om de klok terug te zetten;
   // met een echte Upstash-database slaan we dit over.
@@ -351,9 +468,9 @@ async function testen() {
    * Zet de aanvraag zoveel minuten terug in de tijd. Omdat we buiten de app om
    * schrijven, moeten we de servercache (SNAPSHOT_TTL_MS) laten verlopen.
    */
-  async function tijdreis(minuten) {
+  async function tijdreis(minuten, id = doelId) {
     const toen = Date.now() - minuten * 60_000;
-    await redisCmd(['hset', `req:${doelId}`, 'createdAt', String(toen), 'lastConfirmedAt', String(toen)]);
+    await redisCmd(['hset', `req:${id}`, 'createdAt', String(toen), 'lastConfirmedAt', String(toen)]);
     await wacht(3200);
   }
 
@@ -398,6 +515,153 @@ async function testen() {
       gepauzeerd: tweedeKeer.data?.gepauzeerd?.length,
     })
   );
+
+  // --- Check-in: "nee, haal ons maar uit de lijst" -------------------------
+  console.log('\nCheck-in: nee-knop');
+
+  const neeSong = (await api('/api/songs?q=goodbye')).data.resultaten[0];
+  const neeAanvraag = await api('/api/request', {
+    method: 'POST',
+    body: { songId: neeSong.id, zangerNaam: 'Weggaander', deviceId: 'dev-nee' },
+  });
+  check('extra aanvraag voor de nee-test lukt', neeAanvraag.status === 200);
+  const neeId = neeAanvraag.data?.id;
+
+  await tijdreis(16, neeId);
+  const metVraag = await api('/api/queue?deviceId=dev-nee');
+  check(
+    'check-in-vraag staat open',
+    metVraag.data?.checkin?.requestId === neeId,
+    JSON.stringify(metVraag.data?.checkin)
+  );
+
+  const nee = await api('/api/request', {
+    method: 'DELETE',
+    body: { requestId: neeId, deviceId: 'dev-nee' },
+  });
+  check('"nee" haalt de aanvraag direct uit de lijst', nee.status === 200);
+
+  const naNee = await api('/api/queue?deviceId=dev-nee');
+  check('...het nummer staat niet meer in de rij', !naNee.data?.wachtrij?.some((e) => e.id === neeId));
+  check('...en staat ook niet gepauzeerd', naNee.data?.gepauzeerd?.length === 0);
+  check('...de check-in-vraag is weg', naNee.data?.checkin === null);
+
+  // --- Verrassingskeuze van de host ----------------------------------------
+  console.log('\nVerrassingskeuze');
+
+  const teKort = await api('/api/host', {
+    method: 'POST',
+    body: { actie: 'verrassing' },
+    pin: PIN,
+  });
+  check(
+    `verrassing wordt geweigerd onder de ${VERRASSING_MIN_RIJ} nummers`,
+    teKort.status === 409 && teKort.data?.code === 'TE_KORT',
+    JSON.stringify(teKort.data)
+  );
+
+  await vulRijTot(VERRASSING_MIN_RIJ);
+  const vol = await api('/api/queue');
+  check(
+    `de rij telt nu minstens ${VERRASSING_MIN_RIJ} nummers`,
+    vol.data?.wachtrij?.length >= VERRASSING_MIN_RIJ,
+    `${vol.data?.wachtrij?.length} nummers`
+  );
+
+  const topVoor = vol.data.wachtrij.slice(0, VERRASSING_BESCHERMDE_TOP);
+  const stemmenVoor = Object.fromEntries(vol.data.wachtrij.map((e) => [e.id, e.stemmen]));
+
+  const verrassing = await api('/api/host', {
+    method: 'POST',
+    body: { actie: 'verrassing' },
+    pin: PIN,
+  });
+  check('verrassing lukt bij een volle rij', verrassing.status === 200, JSON.stringify(verrassing.data));
+  const gekozenId = verrassing.data?.verrassing?.id;
+
+  check(
+    `het gekozen nummer kwam van buiten de top ${VERRASSING_BESCHERMDE_TOP}`,
+    verrassing.data?.verrassing?.positie > VERRASSING_BESCHERMDE_TOP &&
+      !topVoor.some((e) => e.id === gekozenId),
+    `stond op #${verrassing.data?.verrassing?.positie}`
+  );
+
+  const naVerrassing = await api('/api/queue');
+  check(
+    'het gekozen nummer staat nu op #1',
+    naVerrassing.data?.wachtrij?.[0]?.id === gekozenId,
+    `#1 is ${naVerrassing.data?.wachtrij?.[0]?.id}, verwacht ${gekozenId}`
+  );
+  check('...en is gemarkeerd als verrassingskeuze', naVerrassing.data?.wachtrij?.[0]?.verrassingOp > 0);
+  check('"nu aan de beurt" volgt de verrassing', naVerrassing.data?.nuAanDeBeurt?.id === gekozenId);
+
+  check(
+    'geen enkele stem is verplaatst',
+    naVerrassing.data.wachtrij.every((e) => stemmenVoor[e.id] === undefined || stemmenVoor[e.id] === e.stemmen),
+    JSON.stringify(
+      naVerrassing.data.wachtrij
+        .filter((e) => stemmenVoor[e.id] !== undefined && stemmenVoor[e.id] !== e.stemmen)
+        .map((e) => `${e.id}: ${stemmenVoor[e.id]} -> ${e.stemmen}`)
+    )
+  );
+  check(
+    'de rij is niet korter geworden',
+    naVerrassing.data.wachtrij.length === vol.data.wachtrij.length
+  );
+
+  await api('/api/host', { method: 'POST', body: { actie: 'skip', requestId: gekozenId }, pin: PIN });
+  const naSkipVerrassing = await api('/api/queue');
+  check(
+    'skip haalt de verrassingsmarkering er weer af',
+    naSkipVerrassing.data?.wachtrij?.[0]?.id !== gekozenId &&
+      !naSkipVerrassing.data?.wachtrij?.some((e) => e.id === gekozenId && e.verrassingOp > 0),
+    `#1 is nu ${naSkipVerrassing.data?.wachtrij?.[0]?.id}`
+  );
+}
+
+/** Vult de wachtrij aan tot minstens `doel` nummers, met steeds nieuwe apparaten. */
+async function vulRijTot(doel) {
+  const gebruikteSongs = new Set(
+    ((await api('/api/queue')).data?.wachtrij ?? []).map((e) => e.songId)
+  );
+
+  const kandidaten = [];
+  for (const term of ['love', 'you', 'night', 'dance', 'rock', 'baby', 'heart', 'time', 'home']) {
+    for (const song of (await api(`/api/songs?q=${term}`)).data?.resultaten ?? []) {
+      if (!gebruikteSongs.has(song.id)) {
+        gebruikteSongs.add(song.id);
+        kandidaten.push(song);
+      }
+    }
+  }
+
+  let index = 0;
+  let device = 0;
+  let opDitDevice = 0;
+  let inRij = ((await api('/api/queue')).data?.wachtrij ?? []).length;
+
+  while (inRij < doel && index < kandidaten.length) {
+    const res = await api('/api/request', {
+      method: 'POST',
+      body: {
+        songId: kandidaten[index].id,
+        zangerNaam: `Vuller ${device}`,
+        deviceId: `dev-vul-${device}`,
+        // Af en toe een duet, zodat de volle rij ook die weergave dekt.
+        ...(index % 4 === 0 ? { extraSingers: [`Maatje ${device}`] } : {}),
+      },
+    });
+    index++;
+    if (res.status !== 200) continue;
+
+    inRij++;
+    opDitDevice++;
+    // Twee aanvragen per apparaat, dat is de limiet.
+    if (opDitDevice >= 2) {
+      device++;
+      opDitDevice = 0;
+    }
+  }
 }
 
 try {

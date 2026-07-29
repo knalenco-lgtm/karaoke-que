@@ -2,18 +2,23 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiFout } from '@/lib/client';
+import { MAX_EXTRA_ZANGER_LENGTE, MAX_EXTRA_ZANGERS } from '@/lib/constants';
 import type { CatalogSong } from '@/lib/types';
 
 const DEBOUNCE_MS = 250;
 
 interface Props {
-  /** Verzendt de aanvraag; geeft een foutmelding terug of null bij succes. */
-  onAanvragen: (song: CatalogSong) => Promise<void>;
+  /** Naam van de aanvrager; staat vast, want die hangt aan dit apparaat. */
+  zangerNaam: string;
+  /** Verzendt de aanvraag; gooit een ApiFout met een leesbare melding. */
+  onAanvragen: (song: CatalogSong, extraSingers: string[]) => Promise<void>;
   /** Uitgeschakeld als de gast al het maximum aantal nummers openstaan heeft. */
   geblokkeerdeReden: string | null;
 }
 
-export function SongSearch({ onAanvragen, geblokkeerdeReden }: Props) {
+export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props) {
+  /** Extra zangers voor een duet of trio; puur weergave in de wachtrij. */
+  const [extraZangers, setExtraZangers] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   /** Het laatst binnengekomen antwoord, mét de zoekterm waar het bij hoort. */
   const [antwoord, setAntwoord] = useState<{ term: string; songs: CatalogSong[] } | null>(null);
@@ -55,8 +60,9 @@ export function SongSearch({ onAanvragen, geblokkeerdeReden }: Props) {
     setVerzendt(true);
     setFout(null);
     try {
-      await onAanvragen(gekozen);
+      await onAanvragen(gekozen, extraZangers.map((n) => n.trim()).filter(Boolean));
       setGekozen(null);
+      setExtraZangers([]);
       setQuery('');
       setAntwoord(null);
     } catch (error) {
@@ -81,6 +87,59 @@ export function SongSearch({ onAanvragen, geblokkeerdeReden }: Props) {
         <p className="mt-2 text-xl leading-tight font-semibold">{gekozen.titel}</p>
         <p className="text-fuchsia-200/70">{gekozen.artiest}</p>
 
+        <div className="mt-4 border-t border-white/10 pt-4">
+          <p className="mb-2 text-xs font-semibold tracking-widest text-fuchsia-300/70 uppercase">
+            Wie zingt er mee?
+          </p>
+
+          <div className="flex min-h-14 items-center rounded-xl border border-white/10 bg-white/5 px-4">
+            <span className="truncate font-semibold">{zangerNaam}</span>
+            <span className="ml-2 shrink-0 text-sm text-fuchsia-200/50">(jij)</span>
+          </div>
+
+          {extraZangers.map((naam, i) => (
+            <div key={i} className="mt-2 flex gap-2">
+              <input
+                type="text"
+                value={naam}
+                onChange={(e) =>
+                  setExtraZangers((huidig) =>
+                    huidig.map((n, j) => (j === i ? e.target.value : n))
+                  )
+                }
+                placeholder={`Naam zanger ${i + 2}`}
+                maxLength={MAX_EXTRA_ZANGER_LENGTE}
+                autoFocus
+                className="kaart min-h-14 min-w-0 flex-1 px-4 placeholder:text-fuchsia-200/40
+                           focus:ring-2 focus:ring-fuchsia-400/60 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setExtraZangers((huidig) => huidig.filter((_, j) => j !== i))}
+                aria-label={`Zanger ${i + 2} verwijderen`}
+                className="min-h-14 w-14 shrink-0 rounded-xl border border-white/15 text-xl
+                           text-fuchsia-100/70 active:bg-white/10"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+
+          {extraZangers.length < MAX_EXTRA_ZANGERS && (
+            <button
+              type="button"
+              onClick={() => setExtraZangers((huidig) => [...huidig, ''])}
+              className="mt-2 min-h-12 w-full rounded-xl border border-dashed border-fuchsia-400/40
+                         text-sm font-semibold text-fuchsia-200/80 active:bg-fuchsia-500/15"
+            >
+              + Zanger toevoegen
+            </button>
+          )}
+          <p className="mt-2 text-xs text-fuchsia-200/40">
+            Duet of trio? Maximaal {MAX_EXTRA_ZANGERS + 1} zangers per nummer.
+          </p>
+        </div>
+
         {fout && <p className="mt-3 text-sm text-rose-300">{fout}</p>}
 
         <div className="mt-4 flex gap-3">
@@ -97,6 +156,7 @@ export function SongSearch({ onAanvragen, geblokkeerdeReden }: Props) {
             type="button"
             onClick={() => {
               setGekozen(null);
+              setExtraZangers([]);
               setFout(null);
             }}
             disabled={verzendt}

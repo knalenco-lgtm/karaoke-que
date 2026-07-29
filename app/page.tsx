@@ -5,9 +5,15 @@ import { SongSearch } from '@/components/SongSearch';
 import { CheckinModal } from '@/components/CheckinModal';
 import { QueueRow, StemKnop } from '@/components/QueueRow';
 import { useQueue } from '@/components/useQueue';
-import { vraagNotificatiePermissie } from '@/components/aandacht';
+import { useBijnaAanDeBeurt, useMeldingen, type MeldingStatus } from '@/components/aandacht';
 import { api, ApiFout, getDeviceId, getNaam, setNaam } from '@/lib/client';
-import { MAX_AANVRAGEN_PER_DEVICE } from '@/lib/constants';
+import {
+  MAX_AANVRAGEN_PER_DEVICE,
+  MAX_EXTRA_ZANGERS,
+  MAX_ZANGER_LENGTE,
+  VERRASSING_MIN_RIJ,
+} from '@/lib/constants';
+import { zangersTekst } from '@/lib/zangers';
 import type { CatalogSong, QueueEntry } from '@/lib/types';
 
 export default function GastenPagina() {
@@ -15,6 +21,9 @@ export default function GastenPagina() {
   const [naam, setNaamState] = useState<string | null>(null);
   const [melding, setMelding] = useState<string | null>(null);
   const [bezigId, setBezigId] = useState<string | null>(null);
+  /** Pas na de eerste aanvraag vragen we om meldingen — dan snapt de gast waarom. */
+  const [toonMeldingUitleg, setToonMeldingUitleg] = useState(false);
+  const { status: meldingStatus, vraagPermissie } = useMeldingen();
 
   // localStorage bestaat pas na hydratie: tijdens de server-render zou dit een
   // andere uitkomst geven en de hydratie breken. Vandaar de effect-hook.
@@ -25,6 +34,7 @@ export default function GastenPagina() {
   }, []);
 
   const { data, fout, klokverschil, ververs } = useQueue(deviceId);
+  useBijnaAanDeBeurt(data?.wachtrij ?? []);
 
   async function actie(fn: () => Promise<unknown>, id?: string) {
     setMelding(null);
@@ -39,13 +49,14 @@ export default function GastenPagina() {
     }
   }
 
-  async function vraagAan(song: CatalogSong) {
+  async function vraagAan(song: CatalogSong, extraSingers: string[]) {
     await api('/api/request', {
       method: 'POST',
-      body: { songId: song.id, zangerNaam: naam, deviceId },
+      body: { songId: song.id, zangerNaam: naam, extraSingers, deviceId },
     });
-    // Toestemming pas vragen als iemand echt meedoet — dan snapt-ie waarom.
-    vraagNotificatiePermissie();
+    // Toestemming pas vragen als iemand echt meedoet, en met uitleg vooraf:
+    // een prompt uit het niets wordt vrijwel altijd weggeklikt.
+    setToonMeldingUitleg(true);
     setMelding(`"${song.titel}" staat in de rij! 🎉`);
     await ververs();
   }
@@ -84,6 +95,7 @@ export default function GastenPagina() {
           Nummer aanvragen
         </h2>
         <SongSearch
+          zangerNaam={naam}
           onAanvragen={vraagAan}
           geblokkeerdeReden={
             vol
@@ -103,6 +115,34 @@ export default function GastenPagina() {
           {fout}
         </p>
       )}
+
+      {toonMeldingUitleg && meldingStatus === 'default' && (
+        <div className="mt-4 rounded-xl border border-lime-400/30 bg-lime-400/10 px-4 py-4">
+          <p className="text-sm leading-relaxed">
+            Zet meldingen aan, dan waarschuwen we je als je bijna aan de beurt bent en voor de
+            ben-je-er-nog-check.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => vraagPermissie()}
+              className="min-h-12 flex-1 rounded-xl bg-lime-400 font-bold text-black active:bg-lime-500"
+            >
+              Meldingen aanzetten
+            </button>
+            <button
+              type="button"
+              onClick={() => setToonMeldingUitleg(false)}
+              className="min-h-12 rounded-xl border border-white/15 px-4 text-sm text-fuchsia-100/70
+                         active:bg-white/10"
+            >
+              Later
+            </button>
+          </div>
+        </div>
+      )}
+
+      <MeldingStatusregel status={meldingStatus} onAanzetten={vraagPermissie} />
 
       <section className="mt-7">
         <h2 className="mb-2 flex items-baseline justify-between px-1">
@@ -208,8 +248,11 @@ export default function GastenPagina() {
         </section>
       )}
 
-      <p className="mt-10 text-center text-xs text-fuchsia-200/40">
-        Eén stem per nummer per telefoon · max {MAX_AANVRAGEN_PER_DEVICE} aanvragen tegelijk
+      <Spelregels />
+
+      <p className="mt-8 text-center text-xs leading-relaxed text-fuchsia-200/40">
+        Max {MAX_AANVRAGEN_PER_DEVICE} aanvragen tegelijk · één stem per nummer per telefoon, op
+        zoveel nummers als je wilt · hou deze pagina open
       </p>
 
       {data?.checkin && (
@@ -224,9 +267,89 @@ export default function GastenPagina() {
               })
             )
           }
+          onAfmelden={async () => {
+            const id = data.checkin!.requestId;
+            try {
+              await api('/api/request', { method: 'DELETE', body: { requestId: id, deviceId } });
+              setMelding('Je nummer is uit de lijst gehaald. Tot de volgende keer! 👋');
+            } catch (error) {
+              setMelding(error instanceof ApiFout ? error.message : 'Er ging iets mis.');
+            }
+            await ververs();
+          }}
         />
       )}
     </main>
+  );
+}
+
+function MeldingStatusregel({
+  status,
+  onAanzetten,
+}: {
+  status: MeldingStatus;
+  onAanzetten: () => void;
+}) {
+  if (status === 'granted') {
+    return <p className="mt-4 px-1 text-xs text-lime-300/80">🔔 Meldingen aan</p>;
+  }
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 px-1">
+      <p className="text-xs text-fuchsia-200/50">
+        🔕 Meldingen uit
+        {status === 'default'
+          ? ' — mis niks als je aan de beurt bent'
+          : ' — zet ze aan via je browserinstellingen'}
+      </p>
+      {status === 'default' && (
+        <button
+          type="button"
+          onClick={onAanzetten}
+          className="text-xs font-semibold text-neon underline underline-offset-2"
+        >
+          Aanzetten
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Spelregels() {
+  return (
+    <details className="kaart mt-8 px-4 py-3">
+      <summary className="cursor-pointer list-none text-sm font-semibold marker:hidden">
+        <span className="text-fuchsia-300/70">▸</span> Spelregels
+      </summary>
+      <ul className="mt-3 flex flex-col gap-3 text-sm leading-relaxed text-fuchsia-100/80">
+        <li>
+          Je mag <strong>{MAX_AANVRAGEN_PER_DEVICE} nummers tegelijk</strong> in de lijst hebben.
+          Is er eentje geweest, dan mag je weer een nieuwe aanvragen.
+        </li>
+        <li>
+          Je hebt <strong>één stem per nummer</strong> per telefoon, maar je mag op zoveel nummers
+          stemmen als je wilt. Op je eigen aanvraag stemmen kan niet.
+        </li>
+        <li>
+          De <strong>meeste stemmen staan bovenaan</strong>. Bij een gelijke stand gaat degene voor
+          die het eerst aanvroeg.
+        </li>
+        <li>
+          Zing je met z&apos;n tweeën of drieën? Voeg bij het aanvragen extra zangers toe — maximaal{' '}
+          {MAX_EXTRA_ZANGERS + 1} per nummer.
+        </li>
+        <li>
+          <strong>Hou deze pagina open en zet meldingen aan.</strong> Sta je lang in de rij, dan
+          vragen we elk kwartier of je er nog bent. Twee keer niet reageren, of &quot;nee&quot;
+          antwoorden, betekent dat je nummer vervalt.
+        </li>
+        <li>
+          Bij een hele volle lijst ({VERRASSING_MIN_RIJ}+ nummers) kan de spelleider af en toe een{' '}
+          <strong>🎲 verrassingsnummer</strong> uit de rij trekken, zodat ook de onderkant een kans
+          maakt.
+        </li>
+      </ul>
+    </details>
   );
 }
 
@@ -240,9 +363,14 @@ function NuAanDeBeurt({ entry, laadt }: { entry: QueueEntry | null; laadt: boole
         <p className="puls mt-2 text-fuchsia-200/50">…</p>
       ) : entry ? (
         <>
+          {entry.verrassingOp > 0 && (
+            <p className="mt-1 text-xs font-bold tracking-wide text-limoen">🎲 verrassingskeuze</p>
+          )}
           <p className="mt-2 text-2xl leading-tight font-black text-balance">{entry.titel}</p>
           <p className="mt-1 text-sm text-fuchsia-200/60">{entry.artiest}</p>
-          <p className="mt-2 text-lg font-semibold text-neon">🎤 {entry.zangerNaam}</p>
+          <p className="mt-2 text-lg font-semibold text-neon text-balance">
+            🎤 {zangersTekst(entry.zangerNaam, entry.extraSingers)}
+          </p>
         </>
       ) : (
         <p className="mt-2 text-fuchsia-200/60">Nog niemand — vraag het eerste nummer aan!</p>
@@ -253,7 +381,7 @@ function NuAanDeBeurt({ entry, laadt }: { entry: QueueEntry | null; laadt: boole
 
 function NaamScherm({ onKlaar }: { onKlaar: (naam: string) => void }) {
   const [waarde, setWaarde] = useState('');
-  const opgeschoond = waarde.trim().slice(0, 40);
+  const opgeschoond = waarde.trim().slice(0, MAX_ZANGER_LENGTE);
 
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-5 py-10">
@@ -278,7 +406,7 @@ function NaamScherm({ onKlaar }: { onKlaar: (naam: string) => void }) {
           value={waarde}
           onChange={(e) => setWaarde(e.target.value)}
           placeholder="Je naam"
-          maxLength={40}
+          maxLength={MAX_ZANGER_LENGTE}
           autoFocus
           autoComplete="given-name"
           enterKeyHint="go"
