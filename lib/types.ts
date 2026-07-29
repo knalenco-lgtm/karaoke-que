@@ -1,5 +1,8 @@
-/** Status van een aanvraag. Alleen `queued` en `paused` tellen als "openstaand". */
-export type RequestStatus = 'queued' | 'paused' | 'done' | 'removed';
+/**
+ * `playing` is het nummer dat op dit moment gezongen wordt: dat staat niet meer
+ * in de wachtrij. Alleen `queued`, `playing` en `paused` tellen als "levend".
+ */
+export type RequestStatus = 'queued' | 'playing' | 'paused' | 'done' | 'removed';
 
 /** Zoals opgeslagen in Redis (hash `req:{id}`). */
 export interface KaraokeRequest {
@@ -12,16 +15,24 @@ export interface KaraokeRequest {
   extraSingers: string[];
   deviceId: string;
   createdAt: number;
+  /**
+   * Bepaalt de plek in de wachtrij: laag is vooraan. Start als volgnummer van
+   * binnenkomst en verschuift alleen door een rondesprong, een skip of de
+   * verrassingskeuze van de host.
+   */
+  arrivalSeq: number;
   status: RequestStatus;
   lastConfirmedAt: number;
   missedCheckins: number;
-  /** Hoe vaak de host dit nummer naar onderen heeft geskipt. */
-  skips: number;
+  /** Aantal rondes op rij zonder op te schuiven; vanaf 2 is de aanvraag beschermd. */
+  stilstandRondes: number;
+  /** Positie aan het eind van de vorige ronde (0 = nog niet gemeten). */
+  vorigePositie: number;
   /** Tijdstip waarop de host dit nummer als verrassing naar voren trok (0 = nooit). */
   verrassingOp: number;
 }
 
-/** Zoals de client hem ziet, verrijkt met stemmen en device-context. */
+/** Zoals de client hem ziet. Bevat nooit wie er gestemd heeft, alleen aantallen. */
 export interface QueueEntry {
   id: string;
   songId: string;
@@ -30,19 +41,21 @@ export interface QueueEntry {
   zangerNaam: string;
   extraSingers: string[];
   createdAt: number;
+  arrivalSeq: number;
   status: RequestStatus;
+  /** Aantal stemmen in de lopende ronde. */
   stemmen: number;
-  skips: number;
   missedCheckins: number;
-  /**
-   * Tijdstip waarop de host dit nummer als verrassing naar voren trok (0 = nooit).
-   * Bepaalt de sortering én of het "🎲 verrassingskeuze"-label getoond wordt.
-   */
+  /** Kan niet meer ingehaald worden door de rondewinnaar. */
+  isBeschermd: boolean;
+  /** Won de vorige stemronde; badge blijft tot de volgende ronde is afgerekend. */
+  isWinnaarVorigeRonde: boolean;
+  /** Door de host als verrassing naar voren getrokken (0 = nee). */
   verrassingOp: number;
   /** Is deze aanvraag van het opvragende device? */
   isMijn: boolean;
-  /** Heeft het opvragende device al gestemd? */
-  heeftGestemd: boolean;
+  /** Heeft het opvragende device deze ronde op dit nummer gestemd? */
+  heeftMijnStem: boolean;
   /** Mag het opvragende device hierop stemmen? (niet op je eigen aanvraag) */
   magStemmen: boolean;
 }
@@ -57,11 +70,16 @@ export interface CheckinPrompt {
 }
 
 export interface QueueResponse {
+  /** Het nummer dat nu gezongen wordt; staat niet in `wachtrij`. */
   nuAanDeBeurt: QueueEntry | null;
   wachtrij: QueueEntry[];
   gepauzeerd: QueueEntry[];
   checkin: CheckinPrompt | null;
-  /** Aantal openstaande aanvragen van dit device (queued + paused). */
+  /** Nummer van de lopende stemronde; wijzigt betekent: nieuwe ronde. */
+  ronde: number;
+  /** Waar dit device deze ronde op gestemd heeft, of null. */
+  mijnStem: string | null;
+  /** Aantal openstaande aanvragen van dit device (queued + playing + paused). */
   eigenAanvragen: number;
   serverTijd: number;
 }

@@ -21,6 +21,18 @@ export const MAX_EXTRA_ZANGER_LENGTE = 30;
 /** Maximale lengte van de naam van de aanvrager zelf. */
 export const MAX_ZANGER_LENGTE = 40;
 
+/** Vanaf deze rijlengte springt de rondewinnaar twee plekken in plaats van één. */
+export const GROTE_RIJ_VANAF = 7;
+/** Sprong van de rondewinnaar bij een korte rij. */
+export const SPRONG_KORTE_RIJ = 1;
+/** Sprong van de rondewinnaar bij een volle rij. */
+export const SPRONG_VOLLE_RIJ = 2;
+/**
+ * Na zoveel rondes zonder op te schuiven is een aanvraag beschermd: de
+ * rondewinnaar mag er niet meer overheen springen.
+ */
+export const BESCHERMING_NA_RONDES = 2;
+
 /** Vanaf zoveel nummers in de rij mag de host een verrassingskeuze trekken. */
 export const VERRASSING_MIN_RIJ = 30;
 /** De bovenste posities blijven buiten de loting: daar is echt op gestemd. */

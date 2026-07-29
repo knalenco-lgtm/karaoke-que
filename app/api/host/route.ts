@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import {
   hostHerstel,
   hostSkip,
+  hostStart,
   hostVerrassing,
   hostVerwijder,
-  hostVolgende,
   QueueError,
 } from '@/lib/queue';
 import { foutRespons, leesBody, tekst } from '@/lib/api';
@@ -38,9 +38,10 @@ export async function POST(request: Request) {
     switch (actie) {
       case 'login':
         break;
-      case 'volgende':
-        await hostVolgende(requestId);
-        break;
+      case 'start':
+        // Eén klik: ronde afrekenen, winnaar laten springen, dit nummer aan de
+        // beurt zetten en de stemmen wissen.
+        return NextResponse.json({ ok: true, start: await hostStart(requestId) });
       case 'skip':
         await hostSkip(requestId);
         break;

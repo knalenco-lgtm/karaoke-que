@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SongSearch } from '@/components/SongSearch';
 import { CheckinModal } from '@/components/CheckinModal';
 import { QueueRow, StemKnop } from '@/components/QueueRow';
@@ -8,9 +8,13 @@ import { useQueue } from '@/components/useQueue';
 import { useBijnaAanDeBeurt, useMeldingen, type MeldingStatus } from '@/components/aandacht';
 import { api, ApiFout, getDeviceId, getNaam, setNaam } from '@/lib/client';
 import {
+  BESCHERMING_NA_RONDES,
+  GROTE_RIJ_VANAF,
   MAX_AANVRAGEN_PER_DEVICE,
   MAX_EXTRA_ZANGERS,
   MAX_ZANGER_LENGTE,
+  SPRONG_KORTE_RIJ,
+  SPRONG_VOLLE_RIJ,
   VERRASSING_MIN_RIJ,
 } from '@/lib/constants';
 import { zangersTekst } from '@/lib/zangers';
@@ -35,6 +39,7 @@ export default function GastenPagina() {
 
   const { data, fout, klokverschil, ververs } = useQueue(deviceId);
   useBijnaAanDeBeurt(data?.wachtrij ?? []);
+  const nieuweRonde = useRondeWissel(data?.ronde ?? null);
 
   async function actie(fn: () => Promise<unknown>, id?: string) {
     setMelding(null);
@@ -57,7 +62,10 @@ export default function GastenPagina() {
     // Toestemming pas vragen als iemand echt meedoet, en met uitleg vooraf:
     // een prompt uit het niets wordt vrijwel altijd weggeklikt.
     setToonMeldingUitleg(true);
-    setMelding(`"${song.titel}" staat in de rij! 🎉`);
+    setMelding(
+      `"${song.titel}" staat in de rij! 🎉 Je schuift vanzelf op in de rij. Extra snel? ` +
+        'Vraag je vrienden om deze ronde op jullie nummer te stemmen.'
+    );
     await ververs();
   }
 
@@ -145,7 +153,7 @@ export default function GastenPagina() {
       <MeldingStatusregel status={meldingStatus} onAanzetten={vraagPermissie} />
 
       <section className="mt-7">
-        <h2 className="mb-2 flex items-baseline justify-between px-1">
+        <h2 className="mb-1 flex items-baseline justify-between px-1">
           <span className="text-xs font-semibold tracking-widest text-fuchsia-300/70 uppercase">
             De wachtrij
           </span>
@@ -155,6 +163,18 @@ export default function GastenPagina() {
             </span>
           )}
         </h2>
+
+        <p className="px-1 text-xs leading-relaxed text-fuchsia-100/70">
+          Wie het eerst komt, die het eerst zingt — de rondewinnaar springt vooruit.
+        </p>
+
+        <Spelregels />
+
+        {nieuweRonde && (
+          <p className="mb-2 rounded-xl border border-lime-400/40 bg-lime-400/10 px-4 py-3 text-sm font-semibold text-lime-100">
+            🔔 Nieuwe stemronde! Je hebt weer één stem.
+          </p>
+        )}
 
         {data && data.wachtrij.length === 0 ? (
           <p className="kaart px-4 py-6 text-center text-sm text-fuchsia-200/60">
@@ -167,7 +187,7 @@ export default function GastenPagina() {
                 key={entry.id}
                 entry={entry}
                 positie={i + 1}
-                aanDeBeurt={i === 0}
+                eerstvolgende={i === 0}
                 acties={
                   entry.isMijn ? (
                     <button
@@ -209,6 +229,13 @@ export default function GastenPagina() {
             ))}
           </ul>
         )}
+
+        {data && data.wachtrij.length > 0 && (
+          <p className="mt-2 px-1 text-xs text-fuchsia-200/40">
+            Eén stem per ronde — druk op een ander nummer om je stem te verplaatsen. Stemmen is
+            optioneel en anoniem.
+          </p>
+        )}
       </section>
 
       {mijnGepauzeerd.length > 0 && (
@@ -248,11 +275,9 @@ export default function GastenPagina() {
         </section>
       )}
 
-      <Spelregels />
-
       <p className="mt-8 text-center text-xs leading-relaxed text-fuchsia-200/40">
-        Max {MAX_AANVRAGEN_PER_DEVICE} aanvragen tegelijk · één stem per nummer per telefoon, op
-        zoveel nummers als je wilt · hou deze pagina open
+        Volgorde van binnenkomst · max {MAX_AANVRAGEN_PER_DEVICE} aanvragen tegelijk · één stem per
+        stemronde, te verplaatsen zolang de ronde loopt · hou deze pagina open
       </p>
 
       {data?.checkin && (
@@ -281,6 +306,29 @@ export default function GastenPagina() {
       )}
     </main>
   );
+}
+
+/**
+ * Signaleert dat er een nieuwe stemronde begonnen is. Blijft acht seconden
+ * staan; lang genoeg om te zien, kort genoeg om niet in de weg te zitten.
+ */
+function useRondeWissel(ronde: number | null): boolean {
+  const vorige = useRef<number | null>(null);
+  const [zichtbaar, setZichtbaar] = useState(false);
+
+  useEffect(() => {
+    if (ronde === null) return;
+    if (vorige.current === null || vorige.current === ronde) {
+      vorige.current = ronde;
+      return;
+    }
+    vorige.current = ronde;
+    setZichtbaar(true);
+    const timer = setTimeout(() => setZichtbaar(false), 8000);
+    return () => clearTimeout(timer);
+  }, [ronde]);
+
+  return zichtbaar;
 }
 
 function MeldingStatusregel({
@@ -317,36 +365,35 @@ function MeldingStatusregel({
 
 function Spelregels() {
   return (
-    <details className="kaart mt-8 px-4 py-3">
+    <details className="kaart mt-2 mb-3 px-4 py-3">
       <summary className="cursor-pointer list-none text-sm font-semibold marker:hidden">
         <span className="text-fuchsia-300/70">▸</span> Spelregels
       </summary>
-      <ul className="mt-3 flex flex-col gap-3 text-sm leading-relaxed text-fuchsia-100/80">
+      <p className="mt-3 text-sm leading-relaxed text-fuchsia-100/80">
+        De rij is op volgorde van aanvragen. Tijdens elk nummer mag je één stem uitbrengen op je
+        favoriet; de winnaar van de ronde springt {SPRONG_KORTE_RIJ} plekje vooruit (
+        {SPRONG_VOLLE_RIJ} bij een volle rij, {GROTE_RIJ_VANAF}+). Daarna beginnen de stemmen
+        opnieuw. Een nummer dat {BESCHERMING_NA_RONDES} rondes stilstaat kan niet nog eens worden
+        ingehaald. Stemmen is optioneel en anoniem. En onthoud: het is geen wedstrijd — het
+        belangrijkste is dat we er samen een gezellige avond van maken. 🎤
+      </p>
+      <ul className="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-fuchsia-100/70">
         <li>
-          Je mag <strong>{MAX_AANVRAGEN_PER_DEVICE} nummers tegelijk</strong> in de lijst hebben.
-          Is er eentje geweest, dan mag je weer een nieuwe aanvragen.
+          Je mag {MAX_AANVRAGEN_PER_DEVICE} nummers tegelijk in de lijst hebben. Op je eigen
+          aanvraag stemmen kan niet.
         </li>
         <li>
-          Je hebt <strong>één stem per nummer</strong> per telefoon, maar je mag op zoveel nummers
-          stemmen als je wilt. Op je eigen aanvraag stemmen kan niet.
+          Zing je met z&apos;n tweeën of drieën? Voeg bij het aanvragen extra zangers toe —
+          maximaal {MAX_EXTRA_ZANGERS + 1} per nummer.
         </li>
         <li>
-          De <strong>meeste stemmen staan bovenaan</strong>. Bij een gelijke stand gaat degene voor
-          die het eerst aanvroeg.
+          Hou deze pagina open en zet meldingen aan. Sta je lang in de rij, dan vragen we elk
+          kwartier of je er nog bent. Twee keer niet reageren, of &quot;nee&quot; antwoorden,
+          betekent dat je nummer vervalt.
         </li>
         <li>
-          Zing je met z&apos;n tweeën of drieën? Voeg bij het aanvragen extra zangers toe — maximaal{' '}
-          {MAX_EXTRA_ZANGERS + 1} per nummer.
-        </li>
-        <li>
-          <strong>Hou deze pagina open en zet meldingen aan.</strong> Sta je lang in de rij, dan
-          vragen we elk kwartier of je er nog bent. Twee keer niet reageren, of &quot;nee&quot;
-          antwoorden, betekent dat je nummer vervalt.
-        </li>
-        <li>
-          Bij een hele volle lijst ({VERRASSING_MIN_RIJ}+ nummers) kan de spelleider af en toe een{' '}
-          <strong>🎲 verrassingsnummer</strong> uit de rij trekken, zodat ook de onderkant een kans
-          maakt.
+          Bij een hele volle lijst ({VERRASSING_MIN_RIJ}+ nummers) kan de spelleider af en toe een
+          🎲 verrassingsnummer uit de rij trekken, zodat ook de onderkant een kans maakt.
         </li>
       </ul>
     </details>
@@ -363,9 +410,6 @@ function NuAanDeBeurt({ entry, laadt }: { entry: QueueEntry | null; laadt: boole
         <p className="puls mt-2 text-fuchsia-200/50">…</p>
       ) : entry ? (
         <>
-          {entry.verrassingOp > 0 && (
-            <p className="mt-1 text-xs font-bold tracking-wide text-limoen">🎲 verrassingskeuze</p>
-          )}
           <p className="mt-2 text-2xl leading-tight font-black text-balance">{entry.titel}</p>
           <p className="mt-1 text-sm text-fuchsia-200/60">{entry.artiest}</p>
           <p className="mt-2 text-lg font-semibold text-neon text-balance">
@@ -373,7 +417,9 @@ function NuAanDeBeurt({ entry, laadt }: { entry: QueueEntry | null; laadt: boole
           </p>
         </>
       ) : (
-        <p className="mt-2 text-fuchsia-200/60">Nog niemand — vraag het eerste nummer aan!</p>
+        <p className="mt-2 text-fuchsia-200/60">
+          Nog niks gestart — de spelleider kiest het eerste nummer.
+        </p>
       )}
     </section>
   );

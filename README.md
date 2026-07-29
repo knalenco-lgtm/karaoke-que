@@ -6,8 +6,8 @@ eigen pagina met pincode om de rij af te werken.
 
 - **Gastenpagina** `/` — naam invullen, nummer zoeken, aanvragen (alleen of als duet/trio),
   stemmen, eigen aanvraag intrekken
-- **Hostpagina** `/host` — afvinken, skippen, verwijderen, gepauzeerde aanvragen herstellen,
-  verrassingskeuze trekken
+- **Hostpagina** `/host` — tik het nummer aan dat gaat zingen (dat rekent de stemronde af),
+  skippen, verwijderen, gepauzeerde aanvragen herstellen, verrassingskeuze trekken
 - **QR-pagina** `/qr` — QR-code van de eigen URL, met downloadknop
 
 Stack: Next.js (App Router) + TypeScript + Tailwind, Upstash Redis als datastore, live updates
@@ -67,9 +67,9 @@ npm run test:api
 ```
 
 Start een fake-Upstash plus een dev-server, speelt een compleet feestscenario af (aanvragen,
-dubbele nummers, duetten, stemlimieten, host-acties, een check-in die verloopt door de klok
-terug te zetten, en een verrassingskeuze uit een rij van 30+) en ruimt daarna alles op.
-71 checks, geen Upstash-account nodig.
+dubbele nummers, duetten, de stemronde met sprongen, tie-breaks en de beschermregel,
+host-acties, een check-in die verloopt door de klok terug te zetten, en een verrassingskeuze uit
+een rij van 30+) en ruimt daarna alles op. 96 checks, geen Upstash-account nodig.
 
 Tegen een al draaiende server met echte Redis:
 
@@ -109,15 +109,36 @@ Ontbreken ze, dan geeft de app een duidelijke melding in plaats van een cryptisc
 
 ## Spelregels
 
-**Sortering** — verrassingskeuze → minst geskipt → meeste stemmen → wie het eerst aanvroeg.
-Bij gelijke stand staat degene die het eerst aanvroeg dus bovenaan.
+**Volgorde** — de wachtrij staat puur op volgorde van binnenkomst (`arrivalSeq`). Voordringen
+gebeurt alleen door de stemronde te winnen, en de host kan een nummer naar achteren skippen of
+als verrassing naar voren halen.
+
+**Stemronde** — tijdens elk nummer loopt er één ronde. Elke telefoon heeft die ronde precies
+één stem, uit te brengen op één aanvraag in de wachtrij; op je eigen aanvraag stemmen kan niet.
+Opnieuw stemmen verplaatst je stem in plaats van er een toe te voegen. Stemmen is optioneel en
+anoniem: wie op wat gestemd heeft blijft server-side, naar buiten gaan alleen aantallen.
+
+Bij het afrekenen springt het nummer met de meeste stemmen vooruit: één plek bij een rij tot en
+met 6 nummers, twee plekken vanaf 7. Bij een gelijke stand wint wie het langst in de rij staat.
+Is er niet gestemd, dan springt er niemand. Daarna worden alle stemmen gewist en begint een
+nieuwe ronde; de winnaar houdt een 🏆-badge tot de ronde erna.
+
+**Beschermregel** — per aanvraag wordt bijgehouden hoeveel rondes op rij hij niet is opgeschoven
+(positie gelijk of slechter dan de vorige ronde). Vanaf 2 zulke rondes is de aanvraag beschermd:
+de rondewinnaar kan er niet meer overheen springen en landt er direct onder. Zodra de aanvraag
+weer opschuift, valt de bescherming weg.
+
+**De host hoeft niets te beheren** — er is geen aparte "volgende"- of afreken-knop. De hele
+wachtrij is aanklikbaar; de host tikt het nummer aan dat nu gezongen gaat worden (meestal #1,
+maar het mag elk nummer zijn) en bevestigt één keer. Die ene klik rekent de lopende ronde af,
+laat de winnaar springen, haalt het aangeklikte nummer uit de rij als "nu aan de beurt", en
+wist de stemmen voor de nieuwe ronde. Is het aangeklikte nummer zelf de rondewinnaar, dan
+vervalt de sprong. Het geheel draait onder een kortdurend slot, zodat er nooit een halve ronde
+kan ontstaan.
 
 **Duetten** — bij het aanvragen kun je maximaal 2 extra zangers toevoegen (samen dus 3). Die
 namen zijn puur weergave: alleen de aanvrager hangt aan het apparaat en kan intrekken of de
 check-in bevestigen. In de lijst staat er dan "Kenneth + Lisa + Tom".
-
-**Stemmen** — één stem per telefoon per aanvraag, server-side afgedwongen met een Redis-set.
-Stemmen op je eigen aanvraag kan niet, intrekken van een stem ook niet.
 
 **Limieten** — maximaal 2 openstaande aanvragen per telefoon. Hetzelfde nummer kan maar één
 keer tegelijk in de rij staan; wie het nogmaals aanvraagt krijgt "staat al in de lijst —
@@ -127,10 +148,12 @@ stem erop!".
 niet op #1 of #2 staat, verschijnt elk kwartier een modal op je eigen pagina, met trilsignaal,
 browsermelding en een knipperende tab-titel. Bevestig je niet binnen 5 minuten, dan wordt je
 nummer gepauzeerd: het verdwijnt uit de actieve rij en komt in een grijs blokje met
-"Ik ben er weer!" (stemmen blijven staan, de aanvraagtijd gaat opnieuw in). Mis je het een
-tweede keer, dan vervalt de aanvraag definitief. Naast de JA-knop zit "Nee, haal ons maar uit
-de lijst": daarmee verdwijnt de aanvraag meteen. De host ziet gepauzeerde aanvragen ook en kan
-ze terugzetten.
+"Ik ben er weer!" (de aanvraag komt achteraan terug). Mis je het een tweede keer, dan vervalt de
+aanvraag definitief. Naast de JA-knop zit "Nee, haal ons maar uit de lijst": daarmee verdwijnt
+de aanvraag meteen. De host ziet gepauzeerde aanvragen ook en kan ze terugzetten.
+
+Dit alles wordt server-side berekend bij elke queue-read, dus er is geen cron of achtergrondtaak
+nodig.
 
 **Meldingen** — na de eerste geslaagde aanvraag legt de app uit waarvoor meldingen dienen en
 vraagt pas daarna toestemming; een prompt uit het niets wordt vrijwel altijd weggeklikt. Een
@@ -138,33 +161,38 @@ statusregel op de gastenpagina laat zien of ze aan of uit staan. Staan ze aan, d
 een melding als je nummer op #2 komt, als je aan de beurt bent, en bij elke check-in.
 
 **Verrassingskeuze** — vanaf 30 nummers in de rij kan de host op "🎲 Verrassing" drukken.
-Die trekt willekeurig een aanvraag van buiten de top 5 (daar is echt op gestemd) en zet hem op
-#1, zonder één stem te verplaatsen: het gekozen nummer krijgt een vlag die in de sortering
-vóór alles gaat. Zolang het bovenaan staat ziet iedereen "🎲 verrassingskeuze". Skipt de host
-het alsnog, dan vervalt de vlag.
-
-Dit alles wordt server-side berekend bij elke queue-read, dus er is geen cron of achtergrondtaak
-nodig.
+Die trekt willekeurig een aanvraag van buiten de top 5 (daar is echt op gestemd) en zet hem
+vooraan in de rij, zonder de lopende ronde of één stem aan te raken. Zolang het nummer bovenaan
+staat ziet iedereen "🎲 verrassingskeuze". Skipt de host het alsnog, dan vervalt de markering.
 
 ## Datamodel (Redis)
 
 | Sleutel | Type | Inhoud |
 | --- | --- | --- |
-| `req:{id}` | hash | `songId`, `titel`, `artiest`, `zangerNaam`, `extraSingers`, `deviceId`, `createdAt`, `status`, `lastConfirmedAt`, `missedCheckins`, `skips`, `verrassingOp` |
-| `live` | set | ids van aanvragen die nog leven (`queued` of `paused`) |
-| `votes:{id}` | set | deviceIds die op deze aanvraag gestemd hebben |
+| `req:{id}` | hash | `songId`, `titel`, `artiest`, `zangerNaam`, `extraSingers`, `deviceId`, `createdAt`, `arrivalSeq`, `status`, `lastConfirmedAt`, `missedCheckins`, `stilstandRondes`, `vorigePositie`, `verrassingOp` |
+| `live` | set | ids van aanvragen die nog leven (`queued`, `playing` of `paused`) |
+| `ronde:stemmen` | hash | `deviceId` → `requestId` van de lopende ronde; één veld per telefoon |
+| `ronde:nummer` | string | aantal afgerekende rondes (de lopende ronde is er eentje verder) |
+| `ronde:winnaar` | string | winnaar van de vorige ronde, voor de 🏆-badge |
 | `device:{deviceId}:requests` | set | openstaande aanvragen van dit apparaat |
 | `request:counter` | string | oplopende teller voor nieuwe ids |
+| `seq:counter` | string | oplopende teller voor `arrivalSeq` |
+| `slot:start` | string | kortdurend slot (NX + PX) rond een host-klik |
 
-`status` is `queued`, `paused`, `done` of `removed`. Afgeronde en verwijderde aanvragen houden
-nog 24 uur een TTL en verdwijnen daarna vanzelf.
+`status` is `queued`, `playing`, `paused`, `done` of `removed`. Het nummer dat gezongen wordt
+staat op `playing` en zit niet in de wachtrij. Afgeronde en verwijderde aanvragen houden nog
+24 uur een TTL en verdwijnen daarna vanzelf.
+
+Dat één hash de hele ronde bevat is bewust: het stemtotaal kost zo één Redis-commando in plaats
+van één per aanvraag, en "opnieuw stemmen" is simpelweg hetzelfde veld overschrijven.
 
 `extraSingers` is een JSON-lijst met maximaal 2 namen en `verrassingOp` een epoch-ms of 0.
 Aanvragen die zonder die velden zijn weggeschreven blijven werken: ze worden gelezen als een
 lege lijst en 0.
 
 `GET /api/queue?deviceId=…` geeft in één response de gesorteerde rij, wie er nu aan de beurt is,
-de gepauzeerde aanvragen en de check-in-status voor dat apparaat.
+de gepauzeerde aanvragen, het rondenummer, waar dít apparaat op gestemd heeft en de
+check-in-status. Nooit staat erin wie er verder op wat gestemd heeft.
 
 ### Let op: het verbruik van de gratis Upstash-tier
 

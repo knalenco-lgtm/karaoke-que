@@ -2,9 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { QueueRow } from '@/components/QueueRow';
+import type { QueueEntry } from '@/lib/types';
 import { useQueue } from '@/components/useQueue';
 import { api, ApiFout, getPin, setPin, wisPin } from '@/lib/client';
-import { VERRASSING_BESCHERMDE_TOP, VERRASSING_MIN_RIJ } from '@/lib/constants';
+import {
+  GROTE_RIJ_VANAF,
+  SPRONG_KORTE_RIJ,
+  SPRONG_VOLLE_RIJ,
+  VERRASSING_BESCHERMDE_TOP,
+  VERRASSING_MIN_RIJ,
+} from '@/lib/constants';
 import { zangersTekst } from '@/lib/zangers';
 
 export default function HostPagina() {
@@ -30,19 +37,37 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
   const { data, fout, ververs } = useQueue(null);
   const [bezigId, setBezigId] = useState<string | null>(null);
   const [melding, setMelding] = useState<{ tekst: string; fout: boolean } | null>(null);
+  /** Het nummer waarvoor om bevestiging gevraagd wordt, tegen misklikken. */
+  const [teStarten, setTeStarten] = useState<QueueEntry | null>(null);
 
   async function hostActie(actie: string, requestId?: string) {
     setBezigId((requestId ?? '') + actie);
     setMelding(null);
     try {
-      const res = await api<{ verrassing?: { titel: string; positie: number } }>('/api/host', {
-        method: 'POST',
-        body: { actie, requestId },
-        pin,
-      });
+      const res = await api<{
+        verrassing?: { titel: string; positie: number };
+        start?: {
+          gestart: { titel: string; zangerNaam: string };
+          winnaar: { titel: string; stemmen: number; gesprongen: boolean } | null;
+          ronde: number;
+        };
+      }>('/api/host', { method: 'POST', body: { actie, requestId }, pin });
+
       if (res.verrassing) {
         setMelding({
-          tekst: `🎲 "${res.verrassing.titel}" stond op #${res.verrassing.positie} en is nu aan de beurt.`,
+          tekst: `🎲 "${res.verrassing.titel}" stond op #${res.verrassing.positie} en staat nu vooraan.`,
+          fout: false,
+        });
+      }
+      if (res.start) {
+        const w = res.start.winnaar;
+        const uitslag = !w
+          ? 'Er was niet gestemd, dus niemand sprong.'
+          : w.gesprongen
+            ? `"${w.titel}" won de ronde met ${w.stemmen} ${w.stemmen === 1 ? 'stem' : 'stemmen'} en sprong vooruit.`
+            : `"${w.titel}" won de ronde, maar gaat zelf zingen — geen sprong.`;
+        setMelding({
+          tekst: `▶ "${res.start.gestart.titel}" — ${res.start.gestart.zangerNaam}. ${uitslag} Ronde ${res.start.ronde} loopt.`,
           fout: false,
         });
       }
@@ -60,6 +85,11 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
     } finally {
       setBezigId(null);
     }
+  }
+
+  async function start(entry: QueueEntry) {
+    setTeStarten(null);
+    await hostActie('start', entry.id);
   }
 
   const rijLengte = data?.wachtrij.length ?? 0;
@@ -128,13 +158,33 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
         </p>
       )}
 
+      {data?.nuAanDeBeurt && (
+        <div className="kaart gloed mb-4 px-4 py-3">
+          <p className="text-xs font-semibold tracking-widest text-fuchsia-300/70 uppercase">
+            Nu aan de beurt
+          </p>
+          <p className="mt-1 font-bold">{data.nuAanDeBeurt.titel}</p>
+          <p className="text-sm text-fuchsia-200/60">
+            {data.nuAanDeBeurt.artiest} · {zangersTekst(data.nuAanDeBeurt.zangerNaam, data.nuAanDeBeurt.extraSingers)}
+          </p>
+        </div>
+      )}
+
+      {rijLengte > 0 && (
+        <p className="mb-2 px-1 text-xs text-fuchsia-200/50">
+          Tik het nummer aan dat nu gaat zingen. Dat rekent meteen de stemronde af en start een
+          nieuwe.
+        </p>
+      )}
+
       <ul className="flex flex-col gap-2">
         {data?.wachtrij.map((entry, i) => (
           <QueueRow
             key={entry.id}
             entry={entry}
             positie={i + 1}
-            aanDeBeurt={i === 0}
+            eerstvolgende={i === 0}
+            onKlik={() => setTeStarten(entry)}
             acties={
               <span className="flex w-12 shrink-0 flex-col items-center justify-center rounded-xl border border-white/10 py-1 text-fuchsia-200/70">
                 <span aria-hidden="true" className="text-sm leading-none">
@@ -145,19 +195,12 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
             }
             onderActies={
               <>
-                {i === 0 && (
-                  <button
-                    type="button"
-                    onClick={() => hostActie('volgende', entry.id)}
-                    disabled={bezigId === entry.id + 'volgende'}
-                    className={`${knop} border-lime-400/50 bg-lime-400/15 text-lime-200 active:bg-lime-400/30`}
-                  >
-                    Gezongen ▶
-                  </button>
-                )}
                 <button
                   type="button"
-                  onClick={() => hostActie('skip', entry.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    hostActie('skip', entry.id);
+                  }}
                   disabled={bezigId === entry.id + 'skip'}
                   className={`${knop} border-white/15 text-fuchsia-100/80 active:bg-white/10`}
                 >
@@ -165,7 +208,10 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
                 </button>
                 <button
                   type="button"
-                  onClick={() => hostActie('verwijder', entry.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    hostActie('verwijder', entry.id);
+                  }}
                   disabled={bezigId === entry.id + 'verwijder'}
                   className={`${knop} border-rose-400/40 text-rose-200 active:bg-rose-500/20`}
                 >
@@ -176,6 +222,45 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
           />
         ))}
       </ul>
+
+      {teStarten && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+        >
+          <div className="kaart gloed w-full max-w-sm p-6 text-center">
+            <p className="text-xs font-semibold tracking-widest text-fuchsia-300/70 uppercase">
+              Starten?
+            </p>
+            <p className="mt-2 text-xl leading-tight font-bold text-balance">{teStarten.titel}</p>
+            <p className="mt-1 text-fuchsia-200/70">
+              {zangersTekst(teStarten.zangerNaam, teStarten.extraSingers)}
+            </p>
+            <p className="mt-3 text-xs text-fuchsia-200/50">
+              De lopende stemronde wordt afgerekend en er begint een nieuwe.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => start(teStarten)}
+              disabled={bezigId === teStarten.id + 'start'}
+              className="mt-5 min-h-14 w-full rounded-xl bg-lime-400 text-lg font-black text-black
+                         active:bg-lime-500 disabled:opacity-50"
+            >
+              Ja, starten ▶
+            </button>
+            <button
+              type="button"
+              onClick={() => setTeStarten(null)}
+              className="mt-3 min-h-12 w-full rounded-xl border border-white/15 text-sm
+                         text-fuchsia-100/70 active:bg-white/10"
+            >
+              Annuleren
+            </button>
+          </div>
+        </div>
+      )}
 
       {data && data.gepauzeerd.length > 0 && (
         <section className="mt-8">
@@ -215,7 +300,8 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
       )}
 
       <p className="mt-10 text-center text-xs text-fuchsia-200/40">
-        Sortering: verrassingskeuze → minst geskipt → meeste stemmen → wie het eerst aanvroeg
+        Volgorde van binnenkomst · de rondewinnaar springt {SPRONG_KORTE_RIJ} plek vooruit
+        ({SPRONG_VOLLE_RIJ} vanaf {GROTE_RIJ_VANAF} nummers)
       </p>
     </main>
   );

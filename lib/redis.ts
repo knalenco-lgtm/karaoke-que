@@ -30,12 +30,26 @@ export function getRedis(): Redis {
 export const KEYS = {
   /** Hash met de velden van één aanvraag. */
   request: (id: string) => `req:${id}`,
-  /** Set met alle aanvraag-ids die nog leven (queued of paused). */
+  /** Set met alle aanvraag-ids die nog leven (queued, playing of paused). */
   live: 'live',
-  /** Set met deviceIds die op deze aanvraag gestemd hebben. */
-  votes: (requestId: string) => `votes:${requestId}`,
   /** Set met openstaande aanvraag-ids van dit device. */
   deviceRequests: (deviceId: string) => `device:${deviceId}:requests`,
   /** Teller voor oplopende aanvraag-ids. */
   counter: 'request:counter',
+  /** Teller voor het volgnummer in de wachtrij (arrivalSeq). */
+  seqCounter: 'seq:counter',
+
+  /**
+   * Stemmen van de lopende ronde: hash deviceId -> requestId. Eén veld per
+   * telefoon, dus opnieuw stemmen overschrijft je vorige stem. Wordt bij elke
+   * nieuwe ronde in z'n geheel weggegooid.
+   */
+  rondeStemmen: 'ronde:stemmen',
+  /** Nummer van de lopende ronde; de client ziet hieraan dat er een nieuwe is. */
+  rondeNummer: 'ronde:nummer',
+  /** Winnaar van de vorige ronde, voor de 🏆-badge. */
+  rondeWinnaar: 'ronde:winnaar',
+
+  /** Kortdurend slot zodat een host-klik nooit half uitgevoerd raakt. */
+  slot: (naam: string) => `slot:${naam}`,
 } as const;

@@ -17,6 +17,17 @@ const poort = Number(process.argv[2] ?? 39117);
 
 /** @type {Map<string, string|Map<string,string>|Set<string>>} */
 const store = new Map();
+/** Vervaldatums voor sleutels die met PX gezet zijn (het slot). */
+const vervalt = new Map();
+
+/** Ruimt een verlopen sleutel op en meldt of hij verlopen was. */
+function vervallen(key) {
+  const tijd = vervalt.get(key);
+  if (tijd === undefined || tijd > Date.now()) return false;
+  store.delete(key);
+  vervalt.delete(key);
+  return true;
+}
 
 function alsSet(key) {
   let value = store.get(key);
@@ -78,12 +89,16 @@ function voerUit(commando) {
     }
     case 'hgetall': {
       const value = store.get(args[0]);
-      if (!(value instanceof Map)) return null;
+      // Redis geeft een lege lijst voor een sleutel die niet bestaat, geen null.
+      if (!(value instanceof Map)) return [];
       return [...value.entries()].flat();
     }
     case 'del': {
       let verwijderd = 0;
-      for (const key of args) if (store.delete(key)) verwijderd++;
+      for (const key of args) {
+        vervalt.delete(key);
+        if (store.delete(key)) verwijderd++;
+      }
       return verwijderd;
     }
     case 'expire':
@@ -94,8 +109,30 @@ function voerUit(commando) {
       store.set(args[0], String(huidig));
       return huidig;
     }
+    case 'get': {
+      const value = store.get(args[0]);
+      if (value === undefined) return null;
+      if (value instanceof Map || value instanceof Set) return null;
+      return vervallen(args[0]) ? null : value;
+    }
+    case 'set': {
+      // Ondersteunt NX en PX, want daarop leunt het slot rond een host-klik.
+      const opties = args.slice(2).map((o) => o.toLowerCase());
+      const nx = opties.includes('nx');
+      if (nx && store.has(args[0]) && !vervallen(args[0])) return null;
+
+      const pxIndex = opties.indexOf('px');
+      store.set(args[0], args[1]);
+      if (pxIndex !== -1) {
+        vervalt.set(args[0], Date.now() + Number(args[2 + pxIndex + 1]));
+      } else {
+        vervalt.delete(args[0]);
+      }
+      return 'OK';
+    }
     case 'flushdb':
       store.clear();
+      vervalt.clear();
       return 'OK';
     default:
       throw new Error(`fake-upstash: commando "${naam}" is niet geïmplementeerd`);
