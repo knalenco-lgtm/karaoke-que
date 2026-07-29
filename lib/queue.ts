@@ -428,10 +428,20 @@ export async function maakAanvraag(input: {
   }
 
   const nu = Date.now();
-  const [id, arrivalSeq] = await Promise.all([
+  const [id, geteld] = await Promise.all([
     redis.incr(KEYS.counter).then(String),
     redis.incr(KEYS.seqCounter),
   ]);
+
+  // Vangnet voor aanvragen van vóór arrivalSeq: die vallen terug op createdAt,
+  // een epoch-ms en dus veel groter dan een verse teller. Zonder deze correctie
+  // zou een nieuw nummer vóór de bestaande rij belanden.
+  const hoogste = requests.reduce((max, r) => Math.max(max, r.arrivalSeq), 0);
+  let arrivalSeq = geteld;
+  if (arrivalSeq <= hoogste) {
+    arrivalSeq = hoogste + 1;
+    await redis.set(KEYS.seqCounter, arrivalSeq);
+  }
   vergeetSnapshot();
 
   await redis.hset(KEYS.request(id), {

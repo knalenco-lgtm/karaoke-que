@@ -421,8 +421,8 @@ async function testen() {
   );
 
   if (!EXTERN) {
-    // Een aanvraag zoals die vóór de duet-functie werd weggeschreven: zonder
-    // extraSingers en zonder verrassingOp. Die moet gewoon blijven werken.
+    // Een aanvraag zoals die vóór de duet- en stemronde-uitbreidingen werd
+    // weggeschreven: zonder extraSingers, verrassingOp en arrivalSeq.
     const toen = String(Date.now());
     await redisCmd([
       'hset', 'req:legacy-1',
@@ -449,10 +449,31 @@ async function testen() {
         legacyEntry.verrassingOp === 0,
       JSON.stringify(legacyEntry)
     );
-    await api('/api/request', {
-      method: 'DELETE',
-      body: { requestId: 'legacy-1', deviceId: 'dev-legacy' },
+    check(
+      '...en valt voor de volgorde terug op zijn aanvraagtijd',
+      legacyEntry?.arrivalSeq === Number(toen),
+      `arrivalSeq ${legacyEntry?.arrivalSeq}, verwacht ${toen}`
+    );
+
+    // Zo'n oude aanvraag heeft een enorm volgnummer (epoch-ms). Een nieuw
+    // nummer moet er nog steeds achter komen, niet ervoor.
+    const naLegacy = await api('/api/request', {
+      method: 'POST',
+      body: { songId: duetSongs[4].id, zangerNaam: 'Nieuw', deviceId: 'dev-na-legacy' },
     });
+    const rijMetLegacy = (await api('/api/queue')).data?.wachtrij ?? [];
+    check(
+      'een nieuwe aanvraag komt achter een aanvraag zonder volgnummer',
+      rijMetLegacy[rijMetLegacy.length - 1]?.id === naLegacy.data?.id,
+      `volgorde: ${rijMetLegacy.map((e) => e.id).join(', ')}`
+    );
+
+    for (const [id, device] of [
+      ['legacy-1', 'dev-legacy'],
+      [naLegacy.data?.id, 'dev-na-legacy'],
+    ]) {
+      await api('/api/request', { method: 'DELETE', body: { requestId: id, deviceId: device } });
+    }
   }
 
   for (const [id, device] of [
