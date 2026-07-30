@@ -4,7 +4,7 @@ Wachtrij-app voor een karaokefeestje. Gasten scannen een QR-code, zoeken een num
 échte KaraFun-catalogus, vragen het aan en stemmen op elkaars nummers. De host heeft een
 eigen pagina met pincode om de rij af te werken.
 
-- **Gastenpagina** `/` — naam invullen, nummer zoeken, aanvragen (alleen of als duet/trio),
+- **Gastenpagina** `/` — naam invullen, nummer zoeken, aanvragen (alleen of als duet),
   stemmen, eigen aanvraag intrekken
 - **Hostpagina** `/host` — tik het nummer aan dat gaat zingen (dat rekent de stemronde af),
   skippen, verwijderen, gepauzeerde aanvragen herstellen, verrassingskeuze trekken
@@ -137,9 +137,9 @@ wist de stemmen voor de nieuwe ronde. Is het aangeklikte nummer zelf de rondewin
 vervalt de sprong. Het geheel draait onder een kortdurend slot, zodat er nooit een halve ronde
 kan ontstaan.
 
-**Duetten** — bij het aanvragen kun je maximaal 2 extra zangers toevoegen (samen dus 3). Die
-namen zijn puur weergave: alleen de aanvrager hangt aan het apparaat en kan intrekken of de
-check-in bevestigen. In de lijst staat er dan "Kenneth + Lisa + Tom".
+**Duetten** — bij het aanvragen kun je één extra zanger toevoegen (samen dus 2). Die naam is
+puur weergave: alleen de aanvrager hangt aan het apparaat en kan intrekken of de check-in
+bevestigen. In de lijst staat er dan "Kenneth + Lisa".
 
 **Limieten** — maximaal 2 openstaande aanvragen per telefoon, maar zodra er meer dan 10
 nummers in de rij staan wordt dat er één, zodat er meer verschillende mensen aan de beurt
@@ -193,7 +193,8 @@ staat op `playing` en zit niet in de wachtrij. Afgeronde en verwijderde aanvrage
 Dat één hash de hele ronde bevat is bewust: het stemtotaal kost zo één Redis-commando in plaats
 van één per aanvraag, en "opnieuw stemmen" is simpelweg hetzelfde veld overschrijven.
 
-`extraSingers` is een JSON-lijst met maximaal 2 namen en `verrassingOp` een epoch-ms of 0.
+`extraSingers` is een JSON-lijst met maximaal 1 naam (zie `MAX_EXTRA_ZANGERS`) en
+`verrassingOp` een epoch-ms of 0.
 Aanvragen die zonder die velden zijn weggeschreven blijven werken: ze worden gelezen als een
 lege lijst en 0.
 

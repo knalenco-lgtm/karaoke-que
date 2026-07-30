@@ -28,6 +28,7 @@ const BESCHERMING_NA_RONDES = 2;
 const MAX_AANVRAGEN_PER_DEVICE = 2;
 const MAX_AANVRAGEN_DRUKKE_RIJ = 1;
 const DRUKKE_RIJ_VANAF = 11;
+const MAX_EXTRA_ZANGERS = 1;
 
 const DEVICE_A = 'test-device-a';
 const DEVICE_B = 'test-device-b';
@@ -364,17 +365,17 @@ async function testen() {
     body: {
       songId: duetSongs[0].id,
       zangerNaam: 'Kenneth',
-      extraSingers: ['Lisa', 'Tom'],
+      extraSingers: ['Lisa'],
       deviceId: DEVICE_A,
     },
   });
-  check('aanvraag met twee extra zangers lukt', duet.status === 200, JSON.stringify(duet.data));
+  check('aanvraag met een extra zanger lukt', duet.status === 200, JSON.stringify(duet.data));
 
   const naDuet = await api('/api/queue');
   const duetEntry = naDuet.data?.wachtrij?.find((e) => e.id === duet.data?.id);
   check(
-    'extra zangers komen terug in de wachtrij',
-    JSON.stringify(duetEntry?.extraSingers) === JSON.stringify(['Lisa', 'Tom']),
+    'de extra zanger komt terug in de wachtrij',
+    JSON.stringify(duetEntry?.extraSingers) === JSON.stringify(['Lisa']),
     JSON.stringify(duetEntry?.extraSingers)
   );
 
@@ -383,12 +384,12 @@ async function testen() {
     body: {
       songId: duetSongs[1].id,
       zangerNaam: 'Bram',
-      extraSingers: ['Een', 'Twee', 'Drie'],
+      extraSingers: ['Een', 'Twee'],
       deviceId: DEVICE_B,
     },
   });
   check(
-    'meer dan drie zangers wordt geweigerd',
+    `meer dan ${MAX_EXTRA_ZANGERS + 1} zangers wordt geweigerd`,
     teVeel.status === 400 && teVeel.data?.code === 'TE_VEEL_ZANGERS',
     JSON.stringify(teVeel.data)
   );

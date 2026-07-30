@@ -17,7 +17,7 @@ interface Props {
 }
 
 export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props) {
-  /** Extra zangers voor een duet of trio; puur weergave in de wachtrij. */
+  /** Extra zangers naast de aanvrager; puur weergave in de wachtrij. */
   const [extraZangers, setExtraZangers] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   /** Het laatst binnengekomen antwoord, mét de zoekterm waar het bij hoort. */
@@ -136,7 +136,7 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
             </button>
           )}
           <p className="mt-2 text-xs text-fuchsia-200/40">
-            Duet of trio? Maximaal {MAX_EXTRA_ZANGERS + 1} zangers per nummer.
+            Samen zingen? Maximaal {MAX_EXTRA_ZANGERS + 1} zangers per nummer.
           </p>
         </div>
 

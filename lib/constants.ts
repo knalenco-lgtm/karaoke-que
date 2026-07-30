@@ -26,8 +26,8 @@ export function maxAanvragenBij(rijLengte: number): number {
   return rijLengte >= DRUKKE_RIJ_VANAF ? MAX_AANVRAGEN_DRUKKE_RIJ : MAX_AANVRAGEN_PER_DEVICE;
 }
 
-/** Aantal extra zangers naast de aanvrager: samen dus maximaal 3 op één nummer. */
-export const MAX_EXTRA_ZANGERS = 2;
+/** Aantal extra zangers naast de aanvrager: samen dus maximaal 2 op één nummer. */
+export const MAX_EXTRA_ZANGERS = 1;
 /** Maximale lengte van de naam van een extra zanger. */
 export const MAX_EXTRA_ZANGER_LENGTE = 30;
 /** Maximale lengte van de naam van de aanvrager zelf. */

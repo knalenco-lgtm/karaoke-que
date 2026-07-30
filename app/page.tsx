@@ -396,8 +396,8 @@ function Spelregels({ maxAanvragen }: { maxAanvragen: number }) {
           Op je eigen aanvraag stemmen kan niet.
         </li>
         <li>
-          Zing je met z&apos;n tweeën of drieën? Voeg bij het aanvragen extra zangers toe —
-          maximaal {MAX_EXTRA_ZANGERS + 1} per nummer.
+          Zing je samen met iemand? Voeg bij het aanvragen een extra zanger toe — maximaal{' '}
+          {MAX_EXTRA_ZANGERS + 1} per nummer.
         </li>
         <li>
           Hou deze pagina open en zet meldingen aan. Sta je lang in de rij, dan vragen we elk
