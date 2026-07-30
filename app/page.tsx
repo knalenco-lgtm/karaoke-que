@@ -9,6 +9,7 @@ import { useBijnaAanDeBeurt, useMeldingen, type MeldingStatus } from '@/componen
 import { api, ApiFout, getDeviceId, getNaam, setNaam } from '@/lib/client';
 import {
   BESCHERMING_NA_RONDES,
+  DRUKKE_RIJ_VANAF,
   GROTE_RIJ_VANAF,
   MAX_AANVRAGEN_PER_DEVICE,
   MAX_EXTRA_ZANGERS,
@@ -78,7 +79,10 @@ export default function GastenPagina() {
   }
   if (naam === '') return <NaamScherm onKlaar={setNaamState} />;
 
-  const vol = (data?.eigenAanvragen ?? 0) >= MAX_AANVRAGEN_PER_DEVICE;
+  // De server bepaalt de limiet (die zakt naar 1 bij een drukke rij) en geeft
+  // hem mee, zodat de knop en de melding niet uit de pas kunnen lopen.
+  const maxAanvragen = data?.maxAanvragen ?? MAX_AANVRAGEN_PER_DEVICE;
+  const vol = (data?.eigenAanvragen ?? 0) >= maxAanvragen;
   const mijnGepauzeerd = data?.gepauzeerd.filter((e) => e.isMijn) ?? [];
 
   return (
@@ -106,9 +110,11 @@ export default function GastenPagina() {
           zangerNaam={naam}
           onAanvragen={vraagAan}
           geblokkeerdeReden={
-            vol
-              ? `Je hebt al ${MAX_AANVRAGEN_PER_DEVICE} nummers openstaan. Zodra er eentje geweest is, mag je weer.`
-              : null
+            !vol
+              ? null
+              : maxAanvragen === 1
+                ? `Het is druk in de rij, dus even één nummer per telefoon — zo komt iedereen aan de beurt. Zodra jouw nummer geweest is, mag je weer.`
+                : `Je hebt al ${maxAanvragen} nummers openstaan. Zodra er eentje geweest is, mag je weer.`
           }
         />
       </section>
@@ -168,7 +174,7 @@ export default function GastenPagina() {
           Wie het eerst komt, die het eerst zingt — de rondewinnaar springt vooruit.
         </p>
 
-        <Spelregels />
+        <Spelregels maxAanvragen={maxAanvragen} />
 
         {nieuweRonde && (
           <p className="mb-2 rounded-xl border border-lime-400/40 bg-lime-400/10 px-4 py-3 text-sm font-semibold text-lime-100">
@@ -276,8 +282,10 @@ export default function GastenPagina() {
       )}
 
       <p className="mt-8 text-center text-xs leading-relaxed text-fuchsia-200/40">
-        Volgorde van binnenkomst · max {MAX_AANVRAGEN_PER_DEVICE} aanvragen tegelijk · één stem per
-        stemronde, te verplaatsen zolang de ronde loopt · hou deze pagina open
+        Volgorde van binnenkomst · max {maxAanvragen}{' '}
+        {maxAanvragen === 1 ? 'aanvraag' : 'aanvragen'} tegelijk
+        {maxAanvragen === 1 && ' (drukke rij)'} · één stem per stemronde, te verplaatsen zolang de
+        ronde loopt · hou deze pagina open
       </p>
 
       {data?.checkin && (
@@ -363,7 +371,7 @@ function MeldingStatusregel({
   );
 }
 
-function Spelregels() {
+function Spelregels({ maxAanvragen }: { maxAanvragen: number }) {
   return (
     <details className="kaart mt-2 mb-3 px-4 py-3">
       <summary className="cursor-pointer list-none text-sm font-semibold marker:hidden">
@@ -379,8 +387,13 @@ function Spelregels() {
       </p>
       <ul className="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-fuchsia-100/70">
         <li>
-          Je mag {MAX_AANVRAGEN_PER_DEVICE} nummers tegelijk in de lijst hebben. Op je eigen
-          aanvraag stemmen kan niet.
+          Je mag {MAX_AANVRAGEN_PER_DEVICE} nummers tegelijk in de lijst hebben. Staan er meer dan{' '}
+          {DRUKKE_RIJ_VANAF - 1} nummers in de rij, dan wordt dat één per telefoon, zodat er meer
+          verschillende mensen aan de beurt komen.{' '}
+          {maxAanvragen === 1 && (
+            <strong className="text-neon">Op dit moment geldt die krappere limiet.</strong>
+          )}{' '}
+          Op je eigen aanvraag stemmen kan niet.
         </li>
         <li>
           Zing je met z&apos;n tweeën of drieën? Voeg bij het aanvragen extra zangers toe —

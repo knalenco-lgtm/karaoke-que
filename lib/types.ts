@@ -81,6 +81,8 @@ export interface QueueResponse {
   mijnStem: string | null;
   /** Aantal openstaande aanvragen van dit device (queued + playing + paused). */
   eigenAanvragen: number;
+  /** Hoeveel aanvragen één telefoon nu open mag hebben; zakt naar 1 bij een drukke rij. */
+  maxAanvragen: number;
   serverTijd: number;
 }
 

@@ -25,6 +25,9 @@ const GROTE_RIJ_VANAF = 7;
 const SPRONG_KORTE_RIJ = 1;
 const SPRONG_VOLLE_RIJ = 2;
 const BESCHERMING_NA_RONDES = 2;
+const MAX_AANVRAGEN_PER_DEVICE = 2;
+const MAX_AANVRAGEN_DRUKKE_RIJ = 1;
+const DRUKKE_RIJ_VANAF = 11;
 
 const DEVICE_A = 'test-device-a';
 const DEVICE_B = 'test-device-b';
@@ -501,20 +504,26 @@ async function testen() {
   }
   let voorraadIndex = 0;
 
-  /** Vraagt één nummer aan namens een eigen apparaat; slaat bezette nummers over. */
-  async function vraagAan(prefix, i) {
+  /**
+   * Vraagt een nummer aan namens `deviceId`. Nummers die al in de rij staan
+   * worden overgeslagen; andere fouten (zoals de limiet) komen gewoon terug.
+   */
+  async function aanvraagVoor(deviceId, naam) {
     while (voorraadIndex < voorraad.length) {
       const res = await api('/api/request', {
         method: 'POST',
-        body: {
-          songId: voorraad[voorraadIndex++].id,
-          zangerNaam: `${prefix}${i}`,
-          deviceId: `${prefix}-dev-${i}`,
-        },
+        body: { songId: voorraad[voorraadIndex++].id, zangerNaam: naam, deviceId },
       });
-      if (res.status === 200) return res.data.id;
+      if (res.data?.code !== 'DUBBEL') return res;
     }
     throw new Error('Voorraad nummers op.');
+  }
+
+  /** Zelfde, maar geeft alleen het id terug en faalt hard bij een fout. */
+  async function vraagAan(prefix, i) {
+    const res = await aanvraagVoor(`${prefix}-dev-${i}`, `${prefix}${i}`);
+    if (res.status !== 200) throw new Error(`Aanvraag mislukt: ${JSON.stringify(res.data)}`);
+    return res.data.id;
   }
 
   /** Bouwt een verse wachtrij van `aantal` nummers, elk van een eigen apparaat. */
@@ -650,6 +659,74 @@ async function testen() {
     });
   }
   check('de wachtrij is opgeruimd na de stemrondes', (await volgorde()).length === 0);
+
+  // --- Aanvraaglimiet bij een drukke rij ------------------------------------
+  console.log('\nAanvraaglimiet');
+
+  await nieuweRij(DRUKKE_RIJ_VANAF - 2, 'lim');
+  const rustigeRij = await api('/api/queue?deviceId=lim-extra');
+  check(
+    `bij ${rustigeRij.data.wachtrij.length} nummers mogen er nog ${MAX_AANVRAGEN_PER_DEVICE} open staan`,
+    rustigeRij.data?.maxAanvragen === MAX_AANVRAGEN_PER_DEVICE,
+    `maxAanvragen: ${rustigeRij.data?.maxAanvragen}`
+  );
+
+  const eerste = await aanvraagVoor('lim-extra', 'Extra');
+  check('eerste aanvraag bij een rustige rij lukt', eerste.status === 200);
+  const tweede = await aanvraagVoor('lim-extra', 'Extra');
+  check('tweede aanvraag bij een rustige rij lukt ook', tweede.status === 200);
+
+  // De rij zit nu op DRUKKE_RIJ_VANAF nummers: vanaf hier geldt één per telefoon.
+  const drukkeRij = await api('/api/queue?deviceId=lim-nieuw');
+  check(
+    `bij ${drukkeRij.data.wachtrij.length} nummers mag er nog maar 1 open staan`,
+    drukkeRij.data?.wachtrij?.length >= DRUKKE_RIJ_VANAF &&
+      drukkeRij.data?.maxAanvragen === MAX_AANVRAGEN_DRUKKE_RIJ,
+    `rij ${drukkeRij.data?.wachtrij?.length}, maxAanvragen ${drukkeRij.data?.maxAanvragen}`
+  );
+
+  const drukEerste = await aanvraagVoor('lim-nieuw', 'Nieuw');
+  check('een eerste aanvraag mag ook bij een drukke rij', drukEerste.status === 200);
+
+  const drukTweede = await aanvraagVoor('lim-nieuw', 'Nieuw');
+  check(
+    'een tweede aanvraag wordt bij een drukke rij geweigerd',
+    drukTweede.status === 409 && drukTweede.data?.code === 'LIMIET',
+    JSON.stringify(drukTweede.data)
+  );
+
+  check(
+    'wie er al twee had houdt ze gewoon',
+    (await api('/api/queue')).data.wachtrij.filter((e) => e.zangerNaam === 'Extra').length === 2
+  );
+
+  // Rij weer onder de drempel brengen: dan mag het weer met z'n tweeën.
+  for (const entry of (await api('/api/queue')).data.wachtrij.slice(0, 3)) {
+    await api('/api/host', {
+      method: 'POST',
+      body: { actie: 'verwijder', requestId: entry.id },
+      pin: PIN,
+    });
+  }
+  const weerRustig = await api('/api/queue?deviceId=lim-nieuw');
+  check(
+    'zakt de rij weer, dan mag er weer een tweede bij',
+    weerRustig.data?.maxAanvragen === MAX_AANVRAGEN_PER_DEVICE,
+    `rij ${weerRustig.data?.wachtrij?.length}, maxAanvragen ${weerRustig.data?.maxAanvragen}`
+  );
+  check(
+    '...en die aanvraag lukt dan ook',
+    (await aanvraagVoor('lim-nieuw', 'Nieuw')).status === 200
+  );
+
+  for (const entry of (await api('/api/queue')).data?.wachtrij ?? []) {
+    await api('/api/host', {
+      method: 'POST',
+      body: { actie: 'verwijder', requestId: entry.id },
+      pin: PIN,
+    });
+  }
+  check('de wachtrij is opgeruimd na de limiettest', (await volgorde()).length === 0);
 
   // --- Check-in die verloopt ----------------------------------------------
   // Vereist directe toegang tot de datastore om de klok terug te zetten;
@@ -870,8 +947,9 @@ async function vulRijTot(doel) {
   }
 
   let index = 0;
+  // Eén apparaat per aanvraag: bij een drukke rij mag er nog maar één per
+  // telefoon openstaan, dus twee per apparaat loopt vast.
   let device = 0;
-  let opDitDevice = 0;
   let inRij = ((await api('/api/queue')).data?.wachtrij ?? []).length;
 
   while (inRij < doel && index < kandidaten.length) {
@@ -889,12 +967,7 @@ async function vulRijTot(doel) {
     if (res.status !== 200) continue;
 
     inRij++;
-    opDitDevice++;
-    // Twee aanvragen per apparaat, dat is de limiet.
-    if (opDitDevice >= 2) {
-      device++;
-      opDitDevice = 0;
-    }
+    device++;
   }
 }
 

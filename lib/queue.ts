@@ -7,7 +7,7 @@ import {
   CHECKIN_RESPIJT_MS,
   CHECKIN_VRIJE_POSITIES,
   GROTE_RIJ_VANAF,
-  MAX_AANVRAGEN_PER_DEVICE,
+  maxAanvragenBij,
   MAX_EXTRA_ZANGER_LENGTE,
   MAX_EXTRA_ZANGERS,
   MAX_GEMISTE_CHECKINS,
@@ -364,6 +364,7 @@ export async function leesWachtrij(deviceId: string | null): Promise<QueueRespon
     ronde: toestand.ronde,
     mijnStem: deviceId ? (toestand.stemmen.get(deviceId) ?? null) : null,
     eigenAanvragen,
+    maxAanvragen: maxAanvragenBij(wachtrij.length),
     serverTijd: nu,
   };
 }
@@ -418,10 +419,17 @@ export async function maakAanvraag(input: {
     throw new QueueError('Dit nummer staat al in de lijst — stem erop!', 409, 'DUBBEL');
   }
 
+  // Hoe voller de rij, hoe krapper de limiet: zo komen er meer verschillende
+  // mensen aan de beurt in plaats van steeds dezelfde.
+  const rijLengte = requests.filter((r) => r.status === 'queued').length;
+  const limiet = maxAanvragenBij(rijLengte);
   const eigen = requests.filter((r) => r.deviceId === input.deviceId).length;
-  if (eigen >= MAX_AANVRAGEN_PER_DEVICE) {
+
+  if (eigen >= limiet) {
     throw new QueueError(
-      `Je hebt al ${MAX_AANVRAGEN_PER_DEVICE} nummers openstaan. Wacht tot er eentje geweest is.`,
+      limiet === 1
+        ? `Het is druk in de rij (${rijLengte} nummers), dus even één nummer per telefoon. Zodra jouw nummer geweest is, mag je weer.`
+        : `Je hebt al ${limiet} nummers openstaan. Wacht tot er eentje geweest is.`,
       409,
       'LIMIET'
     );

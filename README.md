@@ -68,8 +68,9 @@ npm run test:api
 
 Start een fake-Upstash plus een dev-server, speelt een compleet feestscenario af (aanvragen,
 dubbele nummers, duetten, de stemronde met sprongen, tie-breaks en de beschermregel,
-host-acties, een check-in die verloopt door de klok terug te zetten, en een verrassingskeuze uit
-een rij van 30+) en ruimt daarna alles op. 96 checks, geen Upstash-account nodig.
+host-acties, de aanvraaglimiet die bij een drukke rij naar één zakt, een check-in die verloopt
+door de klok terug te zetten, en een verrassingskeuze uit
+een rij van 30+) en ruimt daarna alles op. 108 checks, geen Upstash-account nodig.
 
 Tegen een al draaiende server met echte Redis:
 
@@ -140,9 +141,15 @@ kan ontstaan.
 namen zijn puur weergave: alleen de aanvrager hangt aan het apparaat en kan intrekken of de
 check-in bevestigen. In de lijst staat er dan "Kenneth + Lisa + Tom".
 
-**Limieten** — maximaal 2 openstaande aanvragen per telefoon. Hetzelfde nummer kan maar één
-keer tegelijk in de rij staan; wie het nogmaals aanvraagt krijgt "staat al in de lijst —
-stem erop!".
+**Limieten** — maximaal 2 openstaande aanvragen per telefoon, maar zodra er meer dan 10
+nummers in de rij staan wordt dat er één, zodat er meer verschillende mensen aan de beurt
+komen. Wie er op dat moment al twee had houdt ze gewoon; de limiet blokkeert alleen nieuwe
+aanvragen. Zakt de rij weer onder de drempel, dan mag er weer een tweede bij. De server
+berekent de geldende limiet en geeft hem mee in `GET /api/queue` (`maxAanvragen`), zodat de
+knoptekst en de melding niet uit de pas kunnen lopen met wat de API accepteert.
+
+Hetzelfde nummer kan maar één keer tegelijk in de rij staan; wie het nogmaals aanvraagt krijgt
+"staat al in de lijst — stem erop!".
 
 **Check-in ("ben je er nog?")** — als je aanvraag langer dan 15 minuten in de rij staat én
 niet op #1 of #2 staat, verschijnt elk kwartier een modal op je eigen pagina, met trilsignaal,
