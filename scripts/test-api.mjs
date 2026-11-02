@@ -997,6 +997,16 @@ async function faseDertien(show) {
   const opnieuwHier = await api('/api/request', { method: 'POST', body: { songId: lied.id, zangerNaam: 'Hier', deviceId: 'dev-hier' } });
   check('hetzelfde nummer mag in een andere show ook', opnieuwHier.status === 200 || opnieuwHier.data?.code === 'LIMIET', JSON.stringify(opnieuwHier.data));
 
+  const voorvlucht = await fetch(`${BASE}/api/host?s=${show.code}`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'tauri://localhost', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type' },
+  });
+  check(
+    'de API mag vanuit een andere origin (de Speler)',
+    voorvlucht.status < 300 && voorvlucht.headers.get('access-control-allow-origin') === '*' && /authorization/i.test(voorvlucht.headers.get('access-control-allow-headers') ?? ''),
+    `${voorvlucht.status} ${voorvlucht.headers.get('access-control-allow-headers')}`
+  );
+
   console.log('\nSpeler-token (fase 13)');
   const metToken = await api('/api/host', { method: 'POST', body: { actie: 'login' }, token: show.spelerToken });
   check('het Speler-token mag host-acties doen', metToken.status === 200, JSON.stringify(metToken.data));
