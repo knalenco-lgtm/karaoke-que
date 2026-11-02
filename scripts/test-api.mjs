@@ -1149,11 +1149,62 @@ async function vulRijTot(doel) {
   }
 }
 
+/** Het vaste instapadres /go en de actieve shows. */
+async function actieveShows(show) {
+  console.log('\nActieve shows en /go');
+  const go = async () => {
+    const r = await fetch(`${BASE}/go`, { redirect: 'manual' });
+    return { status: r.status, naar: new URL(r.headers.get('location') ?? '/', BASE) };
+  };
+  const lijst = async () => (await api('/api/show/actief', { show: false })).data?.shows ?? [];
+
+  let g = await go();
+  check('geen actieve show: /go stuurt naar de codepagina', g.status === 307 && g.naar.pathname === '/' && g.naar.searchParams.get('go') === '1' && !g.naar.searchParams.get('s'), g.naar.href);
+  check('...en de lijst is leeg', (await lijst()).length === 0);
+
+  check('actief zetten zonder pincode of token wordt geweigerd', (await api('/api/show/actief', { method: 'POST', body: { show: show.code, actief: true }, show: false })).status === 401);
+  const metToken = await api('/api/show/actief', { method: 'POST', body: { show: show.code, actief: true }, token: show.spelerToken, show: false });
+  check('de Showcomposer zet een show actief met het Speler-token', metToken.status === 200 && metToken.data?.actief === true, JSON.stringify(metToken.data));
+  check('het token van een show geldt niet voor een andere show', (await api('/api/show/actief', { method: 'POST', body: { show: 'KNAP7', actief: true }, token: show.spelerToken, show: false })).status === 401);
+  check('/api/show noemt of de show actief is', (await api(`/api/show?s=${show.code}`, { show: false })).data?.actief === true);
+
+  g = await go();
+  check('één actieve show: /go stuurt direct naar /?s=CODE', g.status === 307 && g.naar.searchParams.get('s') === show.code, g.naar.href);
+
+  const nieuw = (await api('/api/show', { method: 'POST', body: { naam: 'Tweede zaal', actief: true }, pin: PIN, show: false })).data;
+  check('Show maken met actief: true zet de nieuwe show meteen actief', nieuw?.actief === true);
+  const twee = await lijst();
+  check('meerdere actieve shows: de lijst heeft naam, code en aanmaaktijd, nieuwste eerst', twee.length === 2 && twee[0].code === nieuw.code && twee[0].naam === 'Tweede zaal' && twee[0].aangemaakt >= twee[1].aangemaakt, JSON.stringify(twee));
+  g = await go();
+  check('...en /go toont de codepagina met de keuze', g.naar.searchParams.get('go') === '1' && !g.naar.searchParams.get('s'), g.naar.href);
+
+  const metPin = await api('/api/show/actief', { method: 'POST', body: { show: nieuw.code, actief: false }, pin: PIN, show: false });
+  check('de schakelaar op /host zet een show uit met de pincode', metPin.status === 200 && metPin.data?.actief === false);
+  check('...dan is er weer één actieve show', (await lijst()).length === 1);
+  check('een onbekende show actief zetten geeft 404', (await api('/api/show/actief', { method: 'POST', body: { show: 'ZZZZZ', actief: true }, pin: PIN, show: false })).status === 404);
+
+  const los = await api('/api/show/actief', { method: 'POST', body: { show: show.code, actief: false }, token: show.spelerToken, show: false });
+  check('Loskoppelen in de Showcomposer haalt de markering weg', los.status === 200 && (await lijst()).length === 0);
+
+  if (EXTERN) {
+    console.log('  (verlopen: overgeslagen, draait alleen tegen fake-upstash)');
+    return;
+  }
+  // Een show die verloopt (de sleutel is weg, zoals na de TTL van 48 uur) is niet meer actief.
+  await api('/api/show/actief', { method: 'POST', body: { show: nieuw.code, actief: true }, pin: PIN, show: false });
+  await redisCmd(['del', `show:${nieuw.code}`]);
+  check('een verlopen show staat niet meer in de lijst', (await lijst()).length === 0);
+  check('...en is uit de set gehaald', (await redisCmd(['smembers', 'actieve-shows'])).length === 0);
+  g = await go();
+  check('...en /go stuurt naar de codepagina', g.naar.searchParams.get('go') === '1');
+}
+
 try {
   await opzetten();
   const show = await showMaken();
   await testen();
   await faseDertien(show);
+  await actieveShows(show);
 } catch (error) {
   gefaald++;
   console.error(`\n\x1b[31mAfgebroken:\x1b[0m ${error.message}`);

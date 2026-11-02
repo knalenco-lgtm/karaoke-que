@@ -28,8 +28,20 @@ export default function GastenPagina() {
   // Fase 13: elke avond heeft een eigen show-code (uit de QR-code, `?s=`).
   const [show, setShowState] = useState<string | null>(null);
   const [codeMelding, setCodeMelding] = useState<string | null>(null);
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setShowState(getShow()), []);
+  // Via /go (meerdere of geen actieve shows): de codepagina met de actieve shows, niet een bewaarde show.
+  const [viaGo, setViaGo] = useState(false);
+  useEffect(() => {
+    const go = new URLSearchParams(window.location.search).get('go') === '1';
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setViaGo(go);
+    if (go) {
+      setShow('');
+      const url = new URL(window.location.href);
+      url.searchParams.delete('go');
+      window.history.replaceState(null, '', url);
+    }
+    setShowState(go ? '' : getShow());
+  }, []);
 
   if (show === null) {
     return (
@@ -41,6 +53,7 @@ export default function GastenPagina() {
   if (show === '') {
     return (
       <CodeScherm
+        viaGo={viaGo}
         melding={codeMelding}
         onCode={(code) => {
           setShow(code);

@@ -78,6 +78,10 @@ function voerUit(commando) {
       const value = store.get(args[0]);
       return value instanceof Set ? [...value] : [];
     }
+    case 'sismember': {
+      const value = store.get(args[0]);
+      return value instanceof Set && value.has(args[1]) ? 1 : 0;
+    }
     case 'scard': {
       const value = store.get(args[0]);
       return value instanceof Set ? value.size : 0;

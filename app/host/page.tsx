@@ -145,6 +145,22 @@ function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; cod
   const [melding, setMelding] = useState<{ tekst: string; fout: boolean } | null>(null);
   /** Het nummer waarvoor om bevestiging gevraagd wordt, tegen misklikken. */
   const [teStarten, setTeStarten] = useState<QueueEntry | null>(null);
+  // Is dit de show achter het vaste instapadres /go (de QR-code op het bord)?
+  const [actief, setActief] = useState<boolean | null>(null);
+  useEffect(() => {
+    api<{ actief?: boolean }>(`/api/show?s=${encodeURIComponent(code)}`)
+      .then((r) => setActief(!!r.actief))
+      .catch(() => setActief(null));
+  }, [code]);
+  async function zetActief(aan: boolean) {
+    setActief(aan);
+    try {
+      await api('/api/show/actief', { method: 'POST', body: { show: code, actief: aan }, pin });
+    } catch (error) {
+      setActief(!aan);
+      setMelding({ tekst: error instanceof ApiFout ? error.message : 'Actief zetten lukte niet.', fout: true });
+    }
+  }
 
   async function hostActie(actie: string, requestId?: string) {
     setBezigId((requestId ?? '') + actie);
@@ -236,6 +252,15 @@ function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; cod
           QR-code
         </a>
       </div>
+      {actief !== null && (
+        <label className="kaart mb-4 flex min-h-14 cursor-pointer items-center justify-between gap-3 px-4 py-3">
+          <span>
+            <span className="block font-semibold">Dit is de actieve show</span>
+            <span className="block text-sm text-tekst/60">De vaste QR-code (/go) stuurt gasten naar de actieve show.</span>
+          </span>
+          <input type="checkbox" role="switch" checked={actief} onChange={(e) => zetActief(e.target.checked)} className="h-7 w-12 accent-[#F03786]" aria-label="Dit is de actieve show" />
+        </label>
+      )}
 
       {melding && (
         <p
