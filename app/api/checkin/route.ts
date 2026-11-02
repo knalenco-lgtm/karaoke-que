@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { bevestigCheckin, hervat } from '@/lib/queue';
 import { foutRespons, leesBody, tekst } from '@/lib/api';
+import { codeUit } from '@/lib/shows';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,13 +13,14 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const body = await leesBody(request);
+    const code = codeUit(request, body);
     const requestId = tekst(body.requestId);
     const deviceId = tekst(body.deviceId);
 
     if (tekst(body.actie) === 'hervat') {
-      await hervat(requestId, deviceId);
+      await hervat(code, requestId, deviceId);
     } else {
-      await bevestigCheckin(requestId, deviceId);
+      await bevestigCheckin(code, requestId, deviceId);
     }
     return NextResponse.json({ ok: true });
   } catch (error) {

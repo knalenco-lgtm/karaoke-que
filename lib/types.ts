@@ -69,7 +69,30 @@ export interface CheckinPrompt {
   vervaltOp: number;
 }
 
+/** De uitslag van de Knal-meter voor één optreden (Showcomposer, fase 13). */
+export interface Uitslag {
+  id: string;
+  songId: string;
+  titel: string;
+  artiest: string;
+  zangerNaam: string;
+  extraSingers: string[];
+  /** 0 tot 10.000. */
+  score: number;
+  /** Labelteksten zoals de meter ze gaf, bijvoorbeeld "Toonvast". */
+  labels: string[];
+  /** Epoch ms waarop de score binnenkwam. */
+  tijd: number;
+  isMijn: boolean;
+}
+
+export interface ShowInfo {
+  code: string;
+  naam: string;
+}
+
 export interface QueueResponse {
+  show: ShowInfo;
   /** Het nummer dat nu gezongen wordt; staat niet in `wachtrij`. */
   nuAanDeBeurt: QueueEntry | null;
   wachtrij: QueueEntry[];
@@ -83,6 +106,10 @@ export interface QueueResponse {
   eigenAanvragen: number;
   /** Hoeveel aanvragen één telefoon nu open mag hebben; zakt naar 1 bij een drukke rij. */
   maxAanvragen: number;
+  /** De hoogste scores van de avond (hoogstens 10), hoogste eerst. */
+  leaderboard: Uitslag[];
+  /** De scores van de optredens van dit device, nieuwste eerst. */
+  mijnUitslagen: Uitslag[];
   serverTijd: number;
 }
 

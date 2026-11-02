@@ -47,9 +47,13 @@ function alsHash(key) {
   return value;
 }
 
+/** Aantal uitgevoerde commando's, zoals Upstash ze telt (een pipeline telt per commando). */
+let teller = 0;
+
 function voerUit(commando) {
   const [naamRuw, ...args] = commando.map((c) => (typeof c === 'string' ? c : String(c)));
   const naam = naamRuw.toLowerCase();
+  if (naam !== 'teller' && naam !== 'teller-nul') teller++;
 
   switch (naam) {
     case 'sadd': {
@@ -87,6 +91,25 @@ function voerUit(commando) {
       }
       return nieuw;
     }
+    case 'hsetnx': {
+      const hash = alsHash(args[0]);
+      if (hash.has(args[1])) return 0;
+      hash.set(args[1], args[2]);
+      return 1;
+    }
+    case 'hget': {
+      const value = store.get(args[0]);
+      if (!(value instanceof Map)) return null;
+      return value.get(args[1]) ?? null;
+    }
+    case 'exists':
+      return args.filter((k) => store.has(k) && !vervallen(k)).length;
+    case 'teller':
+      // Alleen voor de test: hoeveel commando's sinds het begin (of sinds teller-nul).
+      return teller;
+    case 'teller-nul':
+      teller = 0;
+      return 'OK';
     case 'hgetall': {
       const value = store.get(args[0]);
       // Redis geeft een lege lijst voor een sleutel die niet bestaat, geen null.
@@ -116,15 +139,18 @@ function voerUit(commando) {
       return vervallen(args[0]) ? null : value;
     }
     case 'set': {
-      // Ondersteunt NX en PX, want daarop leunt het slot rond een host-klik.
+      // Ondersteunt NX en PX (het slot rond een host-klik) en EX (de momentopname).
       const opties = args.slice(2).map((o) => o.toLowerCase());
       const nx = opties.includes('nx');
       if (nx && store.has(args[0]) && !vervallen(args[0])) return null;
 
       const pxIndex = opties.indexOf('px');
       store.set(args[0], args[1]);
+      const exIndex = opties.indexOf('ex');
       if (pxIndex !== -1) {
         vervalt.set(args[0], Date.now() + Number(args[2 + pxIndex + 1]));
+      } else if (exIndex !== -1) {
+        vervalt.set(args[0], Date.now() + 1000 * Number(args[2 + exIndex + 1]));
       } else {
         vervalt.delete(args[0]);
       }

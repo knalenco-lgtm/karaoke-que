@@ -27,29 +27,51 @@ export function getRedis(): Redis {
   return client;
 }
 
-export const KEYS = {
-  /** Hash met de velden van één aanvraag. */
-  request: (id: string) => `req:${id}`,
-  /** Set met alle aanvraag-ids die nog leven (queued, playing of paused). */
-  live: 'live',
-  /** Set met openstaande aanvraag-ids van dit device. */
-  deviceRequests: (deviceId: string) => `device:${deviceId}:requests`,
-  /** Teller voor oplopende aanvraag-ids. */
-  counter: 'request:counter',
-  /** Teller voor het volgnummer in de wachtrij (arrivalSeq). */
-  seqCounter: 'seq:counter',
-
-  /**
-   * Stemmen van de lopende ronde: hash deviceId -> requestId. Eén veld per
-   * telefoon, dus opnieuw stemmen overschrijft je vorige stem. Wordt bij elke
-   * nieuwe ronde in z'n geheel weggegooid.
-   */
-  rondeStemmen: 'ronde:stemmen',
-  /** Nummer van de lopende ronde; de client ziet hieraan dat er een nieuwe is. */
-  rondeNummer: 'ronde:nummer',
-  /** Winnaar van de vorige ronde, voor de 🏆-badge. */
-  rondeWinnaar: 'ronde:winnaar',
-
-  /** Kortdurend slot zodat een host-klik nooit half uitgevoerd raakt. */
-  slot: (naam: string) => `slot:${naam}`,
+/**
+ * Sinds fase 13 van de Showcomposer heeft elke show een eigen code, zodat twee hosts op één
+ * avond elk een eigen wachtrij hebben. Alle sleutels van een show staan onder `s:{code}:`.
+ */
+export const SHOW_KEYS = {
+  /** Hash met de gegevens van een show: naam, aangemaakt, spelerToken. */
+  show: (code: string) => `show:${code}`,
 } as const;
+
+export function keys(code: string) {
+  const p = `s:${code}:`;
+  return {
+    /** Hash met de velden van één aanvraag. */
+    request: (id: string) => `${p}req:${id}`,
+    /** Set met alle aanvraag-ids die nog leven (queued, playing of paused). */
+    live: `${p}live`,
+    /** Set met de aanvraag-ids die een score van de Knal-meter hebben (voor het leaderboard). */
+    gescoord: `${p}gescoord`,
+    /** Set met openstaande aanvraag-ids van dit device. */
+    deviceRequests: (deviceId: string) => `${p}device:${deviceId}:requests`,
+    /** Teller voor oplopende aanvraag-ids. */
+    counter: `${p}request:counter`,
+    /** Teller voor het volgnummer in de wachtrij (arrivalSeq). */
+    seqCounter: `${p}seq:counter`,
+
+    /**
+     * Stemmen van de lopende ronde: hash deviceId -> requestId. Eén veld per
+     * telefoon, dus opnieuw stemmen overschrijft je vorige stem. Wordt bij elke
+     * nieuwe ronde in z'n geheel weggegooid.
+     */
+    rondeStemmen: `${p}ronde:stemmen`,
+    /** Nummer van de lopende ronde; de client ziet hieraan dat er een nieuwe is. */
+    rondeNummer: `${p}ronde:nummer`,
+    /** Winnaar van de vorige ronde, voor de 🏆-badge. */
+    rondeWinnaar: `${p}ronde:winnaar`,
+
+    /**
+     * De momentopname van de hele rij als één JSON-string: lezen kost dan één
+     * commando in plaats van één per aanvraag. Elke wijziging gooit hem weg.
+     */
+    snapshot: `${p}snapshot`,
+
+    /** Kortdurend slot zodat een host-klik nooit half uitgevoerd raakt. */
+    slot: (naam: string) => `${p}slot:${naam}`,
+  };
+}
+
+export type Keys = ReturnType<typeof keys>;

@@ -53,17 +53,35 @@ function check(naam, voorwaarde, detail = '') {
   else fout(naam, detail || 'verwachting niet waar');
 }
 
-async function api(pad, { method = 'GET', body, pin } = {}) {
-  const res = await fetch(BASE + pad, {
+/** De show-code van de test (fase 13: elke show heeft een eigen wachtrij). */
+let SHOW = '';
+
+/** Voegt `?s=<show>` toe, tenzij `show` false is of de route zelf al een `s=` heeft. */
+function metShow(pad, show) {
+  if (show === false || /[?&]s=/.test(pad)) return pad;
+  return pad + (pad.includes('?') ? '&' : '?') + 's=' + encodeURIComponent(show ?? SHOW);
+}
+
+async function api(pad, { method = 'GET', body, pin, token, show } = {}) {
+  const res = await fetch(BASE + metShow(pad, show), {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...(pin ? { 'x-host-pin': pin } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => null);
   return { status: res.status, data };
+}
+
+/** Sleutel van de testshow in Redis. */
+const sk = (rest) => `s:${SHOW}:${rest}`;
+
+/** Na een schrijfactie buiten de app om: de momentopname in Redis weggooien (die in het geheugen verloopt na 3 s). */
+async function snapshotWeg() {
+  await redisCmd(['del', sk('snapshot')]);
 }
 
 /** Direct commando naar de lokale fake-upstash (om de klok te kunnen manipuleren). */
@@ -128,10 +146,17 @@ async function opzetten() {
     UPSTASH_REDIS_REST_TOKEN: 'test',
     HOST_PIN: PIN,
   });
-  if (!(await wachtTot(`${BASE}/api/queue`, 90))) {
+  if (!(await wachtTot(`${BASE}/api/songs?q=ab`, 90))) {
     throw new Error('next dev startte niet');
   }
   console.log(`Server draait op ${BASE}\n`);
+}
+
+async function showMaken() {
+  const r = await api('/api/show', { method: 'POST', body: { naam: 'Testavond' }, pin: PIN, show: false });
+  if (r.status !== 200) throw new Error(`show aanmaken mislukt: ${JSON.stringify(r.data)}`);
+  SHOW = r.data.code;
+  return r.data;
 }
 
 async function testen() {
@@ -429,7 +454,7 @@ async function testen() {
     // weggeschreven: zonder extraSingers, verrassingOp en arrivalSeq.
     const toen = String(Date.now());
     await redisCmd([
-      'hset', 'req:legacy-1',
+      'hset', sk('req:legacy-1'),
       'songId', duetSongs[3].id,
       'titel', 'Oud Nummer',
       'artiest', 'Van Vroeger',
@@ -441,7 +466,8 @@ async function testen() {
       'missedCheckins', '0',
       'skips', '0',
     ]);
-    await redisCmd(['sadd', 'live', 'legacy-1']);
+    await redisCmd(['sadd', sk('live'), 'legacy-1']);
+    await snapshotWeg();
     await wacht(3200);
 
     const legacyEntry = (await api('/api/queue')).data?.wachtrij?.find((e) => e.id === 'legacy-1');
@@ -764,7 +790,8 @@ async function testen() {
    */
   async function tijdreis(minuten, id = doelId) {
     const toen = Date.now() - minuten * 60_000;
-    await redisCmd(['hset', `req:${id}`, 'createdAt', String(toen), 'lastConfirmedAt', String(toen)]);
+    await redisCmd(['hset', sk(`req:${id}`), 'createdAt', String(toen), 'lastConfirmedAt', String(toen)]);
+    await snapshotWeg();
     await wacht(3200);
   }
 
@@ -931,6 +958,146 @@ async function testen() {
   );
 }
 
+
+/**
+ * Fase 13 van de Showcomposer: show-codes, het Speler-token, klaar, de score van de Knal-meter,
+ * het leaderboard, de momentopname in Redis en het verbruik.
+ */
+async function faseDertien(show) {
+  console.log('\nShows (fase 13)');
+  const zonderPin = await api('/api/show', { method: 'POST', body: { naam: 'X' }, show: false });
+  check('een show maken zonder pincode wordt geweigerd', zonderPin.status === 401);
+  check('een show heeft een code van 5 tekens', /^[A-HJ-NP-Z2-9]{5}$/.test(show.code), show.code);
+  check('...en een Speler-token', typeof show.spelerToken === 'string' && show.spelerToken.length >= 24);
+
+  const andere = (await api('/api/show', { method: 'POST', body: { naam: 'Andor' }, pin: PIN, show: false })).data;
+  check('twee shows krijgen elk een eigen code', andere?.code && andere.code !== show.code);
+  const eigen = await api('/api/show', { method: 'POST', body: { naam: 'Eigen', code: 'knap-7' }, pin: PIN, show: false });
+  check('een eigen code mag, genormaliseerd', eigen.status === 200 && eigen.data?.code === 'KNAP7', JSON.stringify(eigen.data));
+  check(
+    'dezelfde eigen code nogmaals wordt geweigerd',
+    (await api('/api/show', { method: 'POST', body: { naam: 'Eigen', code: 'KNAP7' }, pin: PIN, show: false })).status === 409
+  );
+
+  const info = await api(`/api/show?s=${show.code.toLowerCase()}`);
+  check('een show opzoeken kan ook met kleine letters', info.status === 200 && info.data?.naam === 'Testavond');
+  check('een onbekende code geeft 404', (await api('/api/show?s=ZZZZZ')).status === 404);
+  check('een ongeldige code geeft 400', (await api('/api/queue?s=0O1')).status === 400);
+  check('zonder code geen wachtrij', (await api('/api/queue', { show: false })).status === 400);
+  check('de wachtrij noemt de show', (await api('/api/queue')).data?.show?.naam === 'Testavond');
+
+  // Scheiding: een aanvraag in de andere show komt niet in deze rij.
+  const lied = (await api('/api/songs?q=wonderwall')).data.resultaten[0];
+  const bijAndor = await api('/api/request', { method: 'POST', body: { songId: lied.id, zangerNaam: 'Andor-gast', deviceId: 'dev-andor' }, show: andere.code });
+  check('aanvragen in een andere show lukt', bijAndor.status === 200, JSON.stringify(bijAndor.data));
+  const rijAndor = (await api('/api/queue', { show: andere.code })).data;
+  const rijHier = (await api('/api/queue')).data;
+  check('de andere show heeft één nummer', rijAndor?.wachtrij?.length === 1);
+  check('...dat niet in deze show staat', !rijHier?.wachtrij?.some((e) => e.titel === lied.titel && e.zangerNaam === 'Andor-gast'));
+  const opnieuwHier = await api('/api/request', { method: 'POST', body: { songId: lied.id, zangerNaam: 'Hier', deviceId: 'dev-hier' } });
+  check('hetzelfde nummer mag in een andere show ook', opnieuwHier.status === 200 || opnieuwHier.data?.code === 'LIMIET', JSON.stringify(opnieuwHier.data));
+
+  console.log('\nSpeler-token (fase 13)');
+  const metToken = await api('/api/host', { method: 'POST', body: { actie: 'login' }, token: show.spelerToken });
+  check('het Speler-token mag host-acties doen', metToken.status === 200, JSON.stringify(metToken.data));
+  const verkeerdToken = await api('/api/host', { method: 'POST', body: { actie: 'login' }, token: 'nep' });
+  check('een verkeerd token wordt geweigerd', verkeerdToken.status === 401 && verkeerdToken.data?.code === 'TOKEN');
+  const tokenAndereShow = await api('/api/host', { method: 'POST', body: { actie: 'login' }, token: show.spelerToken, show: andere.code });
+  check('het token van de ene show werkt niet bij de andere', tokenAndereShow.status === 401);
+  check(
+    'de pincode werkt voor elke show',
+    (await api('/api/host', { method: 'POST', body: { actie: 'login' }, pin: PIN, show: andere.code })).status === 200
+  );
+
+  console.log('\nKlaar, score en leaderboard (fase 13)');
+  // Een schone show voor dit deel, zodat de verwachtingen niet afhangen van de rest van de suite.
+  const avond = (await api('/api/show', { method: 'POST', body: { naam: 'Scoreavond' }, pin: PIN, show: false })).data;
+  const ah = (pad, o = {}) => api(pad, { ...o, show: avond.code });
+  const host = (body) => ah('/api/host', { method: 'POST', body, token: avond.spelerToken });
+  const songs = (await api('/api/songs?q=love')).data.resultaten.slice(0, 4);
+  const ids = [];
+  for (const [i, song] of songs.entries()) {
+    const r = await ah('/api/request', { method: 'POST', body: { songId: song.id, zangerNaam: `Zanger ${i}`, deviceId: `dev-score-${i}` } });
+    ids.push(r.data?.id);
+  }
+  check('vier aanvragen in de scoreshow', ids.every(Boolean), JSON.stringify(ids));
+
+  const teVroeg = await host({ actie: 'uitslag', requestId: ids[0], score: 7000, labels: ['Toonvast'] });
+  check('een score voor een nummer dat nog niet gezongen is wordt geweigerd', teVroeg.status === 409);
+
+  await host({ actie: 'start', requestId: ids[0] });
+  const s0 = await host({ actie: 'uitslag', requestId: ids[0], score: 7200, labels: ['Toonvast', 'Stemmingmaker'] });
+  check('een score voor het spelende nummer lukt', s0.status === 200 && s0.data?.uitslag?.score === 7200, JSON.stringify(s0.data));
+  check('een score boven 10.000 wordt geweigerd', (await host({ actie: 'uitslag', requestId: ids[0], score: 12000 })).status === 400);
+  check('een score die geen getal is wordt geweigerd', (await host({ actie: 'uitslag', requestId: ids[0], score: 'veel' })).status === 400);
+
+  const klaar = await host({ actie: 'klaar' });
+  check('klaar haalt het spelende nummer van het podium', klaar.status === 200 && klaar.data?.klaar?.id === ids[0]);
+  const naKlaar = (await ah('/api/queue?deviceId=dev-score-0')).data;
+  check('...daarna zingt er niemand', naKlaar?.nuAanDeBeurt === null);
+  check('...en de rij heeft er nog drie', naKlaar?.wachtrij?.length === 3);
+  check('klaar zonder spelend nummer doet niets', (await host({ actie: 'klaar' })).data?.klaar === null);
+  check('de zanger ziet zijn score', naKlaar?.mijnUitslagen?.[0]?.score === 7200 && naKlaar.mijnUitslagen[0].isMijn === true, JSON.stringify(naKlaar?.mijnUitslagen));
+  check('...met de labels', naKlaar?.mijnUitslagen?.[0]?.labels?.join('|') === 'Toonvast|Stemmingmaker');
+  check(
+    'een ander ziet de score in het leaderboard maar niet als de zijne',
+    (await ah('/api/queue?deviceId=dev-score-1')).data?.leaderboard?.[0]?.isMijn === false
+  );
+  check('het leaderboard verraadt geen apparaten', !JSON.stringify(naKlaar?.leaderboard).includes('dev-score'));
+
+  await host({ actie: 'start', requestId: ids[1] });
+  await host({ actie: 'uitslag', requestId: ids[1], score: 9100, labels: ['Powerhouse'] });
+  await host({ actie: 'start', requestId: ids[2] });
+  await host({ actie: 'uitslag', requestId: ids[2], score: 7200, labels: [] });
+  // Een score van een al afgelopen nummer bijstellen mag.
+  const bijgesteld = await host({ actie: 'uitslag', requestId: ids[0], score: 8000, labels: ['Toonvast'] });
+  check('een score van een afgelopen nummer bijstellen mag', bijgesteld.status === 200);
+  const lb = (await ah('/api/leaderboard')).data?.leaderboard ?? [];
+  check(
+    'het leaderboard staat op score, hoogste eerst',
+    lb.map((u) => u.id).join(',') === [ids[1], ids[0], ids[2]].join(','),
+    lb.map((u) => `${u.id}:${u.score}`).join(', ')
+  );
+  check('...en de bijgestelde score vervangt de oude', lb.find((u) => u.id === ids[0])?.score === 8000);
+  check('...ook als het nummer al klaar is (start van de volgende archiveert het)', lb.length === 3);
+  check('het leaderboard van een andere show is leeg', ((await api('/api/leaderboard', { show: andere.code })).data?.leaderboard ?? []).length === 0);
+
+  if (!EXTERN) {
+    console.log('\nVerbruik (fase 13)');
+    // Twintig telefoons pollen tien keer zonder dat er iets verandert: de momentopname in
+    // Redis en het geheugen houden dat op hoogstens een paar commando's.
+    await wacht(3200);
+    await redisCmd(['teller-nul']);
+    for (let ronde = 0; ronde < 10; ronde++) {
+      await Promise.all(Array.from({ length: 20 }, (_, t) => ah(`/api/queue?deviceId=dev-poll-${t}`)));
+    }
+    const rustig = await redisCmd(['teller']);
+    check(`200 keer pollen zonder wijziging kost hoogstens 5 commando's (${rustig})`, rustig <= 5);
+
+    // Na het verlopen van het geheugen leest de server de momentopname: één commando.
+    await wacht(3200);
+    await redisCmd(['teller-nul']);
+    await ah('/api/queue?deviceId=dev-poll-0');
+    const eenKeer = await redisCmd(['teller']);
+    check(`een verse lezing met momentopname kost 1 commando (${eenKeer})`, eenKeer === 1);
+
+    // Na een wijziging wordt de rij één keer opnieuw opgebouwd.
+    await host({ actie: 'skip', requestId: ids[3] });
+    await redisCmd(['teller-nul']);
+    await ah('/api/queue');
+    const opnieuw = await redisCmd(['teller']);
+    check(`na een wijziging kost de eerste lezing een paar commando's (${opnieuw})`, opnieuw > 1 && opnieuw < 20);
+    await redisCmd(['teller-nul']);
+    await ah('/api/queue');
+    check('...en de volgende weer niets', (await redisCmd(['teller'])) === 0);
+
+    // Schatting voor een avond: 4 uur, 20 telefoons die elke 4 s pollen (een lezing per
+    // 3 s per instantie), 2 wijzigingen per minuut.
+    const perAvond = Math.round((4 * 3600) / 3 * eenKeer + 4 * 60 * 2 * (opnieuw + 4));
+    check(`een avond van vier uur kost naar schatting ${perAvond} commando's, onder de 20.000`, perAvond < 20000);
+  }
+}
+
 /** Vult de wachtrij aan tot minstens `doel` nummers, met steeds nieuwe apparaten. */
 async function vulRijTot(doel) {
   const gebruikteSongs = new Set(
@@ -974,7 +1141,9 @@ async function vulRijTot(doel) {
 
 try {
   await opzetten();
+  const show = await showMaken();
   await testen();
+  await faseDertien(show);
 } catch (error) {
   gefaald++;
   console.error(`\n\x1b[31mAfgebroken:\x1b[0m ${error.message}`);

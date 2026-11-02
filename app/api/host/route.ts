@@ -1,58 +1,62 @@
 import { NextResponse } from 'next/server';
 import {
   hostHerstel,
+  hostKlaar,
   hostSkip,
   hostStart,
   hostVerrassing,
   hostVerwijder,
   QueueError,
+  uitslagBewaren,
 } from '@/lib/queue';
 import { foutRespons, leesBody, tekst } from '@/lib/api';
+import { codeUit, controleerHost, showBestaat, verleng } from '@/lib/shows';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** Controleert de pincode uit de header tegen env var HOST_PIN. */
-function controleerPin(request: Request): void {
-  const verwacht = process.env.HOST_PIN;
-  if (!verwacht) {
-    throw new QueueError(
-      'HOST_PIN is niet ingesteld. Zet hem in .env.local of in de Vercel-omgevingsvariabelen.',
-      503,
-      'CONFIG'
-    );
-  }
-  if (request.headers.get('x-host-pin') !== verwacht) {
-    throw new QueueError('Onjuiste pincode.', 401, 'PIN');
-  }
-}
-
+/**
+ * Host-acties, met de pincode (header `x-host-pin`) of met het Speler-token van de show
+ * (`Authorization: Bearer …`, de Knal Speler en de Showcomposer). De show-code staat in `?s=`
+ * of in de body (`show`).
+ */
 export async function POST(request: Request) {
   try {
-    controleerPin(request);
-
     const body = await leesBody(request);
+    const code = codeUit(request, body);
+    await controleerHost(request, code);
+    if (!(await showBestaat(code))) {
+      throw new QueueError('Deze show-code bestaat niet (meer).', 404, 'SHOW');
+    }
+
     const actie = tekst(body.actie);
     const requestId = tekst(body.requestId);
 
     switch (actie) {
       case 'login':
+        await verleng(code);
         break;
       case 'start':
         // Eén klik: ronde afrekenen, winnaar laten springen, dit nummer aan de
         // beurt zetten en de stemmen wissen.
-        return NextResponse.json({ ok: true, start: await hostStart(requestId) });
+        return NextResponse.json({ ok: true, start: await hostStart(code, requestId) });
+      case 'klaar':
+        // Fase 13: het nummer is afgelopen zonder dat er een volgende start.
+        return NextResponse.json({ ok: true, klaar: await hostKlaar(code) });
+      case 'uitslag':
+        // Fase 13: de score van de Knal-meter, zodat de zanger hem op zijn telefoon ziet.
+        return NextResponse.json({ ok: true, uitslag: await uitslagBewaren(code, { requestId, score: body.score, labels: body.labels }) });
       case 'skip':
-        await hostSkip(requestId);
+        await hostSkip(code, requestId);
         break;
       case 'verwijder':
-        await hostVerwijder(requestId);
+        await hostVerwijder(code, requestId);
         break;
       case 'herstel':
-        await hostHerstel(requestId);
+        await hostHerstel(code, requestId);
         break;
       case 'verrassing':
-        return NextResponse.json({ ok: true, verrassing: await hostVerrassing() });
+        return NextResponse.json({ ok: true, verrassing: await hostVerrassing(code) });
       default:
         throw new QueueError(`Onbekende actie: ${actie || '(leeg)'}`);
     }
