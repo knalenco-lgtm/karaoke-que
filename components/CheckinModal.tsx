@@ -50,12 +50,12 @@ export function CheckinModal({ checkin, klokverschil, onBevestig, onAfmelden }: 
         <h2 id="checkin-titel" className="mt-3 text-2xl font-bold">
           Ben je er nog?
         </h2>
-        <p className="mt-2 text-fuchsia-100/80">
-          Je staat op <strong className="text-neon">#{checkin.positie}</strong> met
+        <p className="mt-2 text-tekst/80">
+          Je staat op <strong className="text-roze">#{checkin.positie}</strong> met
           <br />
           <strong>{checkin.titel}</strong>
         </p>
-        <p className="mt-3 text-sm text-fuchsia-200/60">
+        <p className="mt-3 text-sm text-tekst/60">
           Nog <span className="tabular-nums">{resterend(tijd)}</span> om te bevestigen, anders
           pauzeren we je nummer.
         </p>
@@ -71,8 +71,8 @@ export function CheckinModal({ checkin, klokverschil, onBevestig, onAfmelden }: 
             }
           }}
           disabled={bezig !== null}
-          className="mt-6 min-h-16 w-full rounded-2xl bg-lime-400 text-xl font-black tracking-wide
-                     text-black active:bg-lime-500 disabled:opacity-50"
+          className="mt-6 min-h-16 w-full rounded-2xl knop-verloop text-xl font-black tracking-wide
+                     text-white active:brightness-90 disabled:opacity-50"
         >
           {bezig === 'ja' ? 'Bezig…' : 'JA, IK BEN ER!'}
         </button>
@@ -89,7 +89,7 @@ export function CheckinModal({ checkin, klokverschil, onBevestig, onAfmelden }: 
           }}
           disabled={bezig !== null}
           className="mt-3 min-h-12 w-full rounded-xl border border-white/15 text-sm font-medium
-                     text-fuchsia-100/70 active:bg-white/10 disabled:opacity-50"
+                     text-tekst/70 active:bg-white/10 disabled:opacity-50"
         >
           {bezig === 'nee' ? 'Bezig…' : 'Nee, haal ons maar uit de lijst'}
         </button>

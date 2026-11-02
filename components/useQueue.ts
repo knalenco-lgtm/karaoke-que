@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '@/lib/client';
+import { api, ApiFout } from '@/lib/client';
 import type { QueueResponse } from '@/lib/types';
 import { POLL_MS } from '@/lib/constants';
 
@@ -12,6 +12,8 @@ import { POLL_MS } from '@/lib/constants';
 export function useQueue(deviceId: string | null) {
   const [data, setData] = useState<QueueResponse | null>(null);
   const [fout, setFout] = useState<string | null>(null);
+  /** De foutcode van de server, bijvoorbeeld SHOW als de show-code niet (meer) bestaat. */
+  const [foutCode, setFoutCode] = useState<string | null>(null);
   /** Verschil tussen server- en clientklok, zodat aftellingen kloppen. */
   const [klokverschil, setKlokverschil] = useState(0);
   /** Voorkomt dat trage pollverzoeken zich opstapelen. */
@@ -30,9 +32,11 @@ export function useQueue(deviceId: string | null) {
       setData(res);
       setKlokverschil(res.serverTijd - Date.now());
       setFout(null);
+      setFoutCode(null);
     } catch (error) {
       if (nummer === teller.current) {
         setFout(error instanceof Error ? error.message : 'Er ging iets mis.');
+        setFoutCode(error instanceof ApiFout ? (error.code ?? null) : null);
       }
     } finally {
       bezig.current = false;
@@ -62,5 +66,5 @@ export function useQueue(deviceId: string | null) {
     };
   }, [ververs]);
 
-  return { data, fout, klokverschil, ververs };
+  return { data, fout, foutCode, klokverschil, ververs };
 }

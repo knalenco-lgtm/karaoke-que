@@ -8,10 +8,21 @@ eigen pagina met pincode om de rij af te werken.
   stemmen, eigen aanvraag intrekken
 - **Hostpagina** `/host` — tik het nummer aan dat gaat zingen (dat rekent de stemronde af),
   skippen, verwijderen, gepauzeerde aanvragen herstellen, verrassingskeuze trekken
-- **QR-pagina** `/qr` — QR-code van de eigen URL, met downloadknop
+- **QR-pagina** `/qr?s=CODE` — QR-code naar de gastenpagina van een show, met downloadknop
+
+**Shows (sinds de karaoke-module van de Knal Showcomposer):** elke avond heeft een eigen
+show-code van 5 tekens, zodat twee hosts op één avond elk een eigen wachtrij hebben. De host
+maakt een show op `/host` (na de pincode), of de Showcomposer maakt hem. Gasten komen binnen met
+`/?s=CODE` (de QR-code) of typen de code in. Een show verloopt na 48 uur. Host-acties mogen met
+de pincode of met het Speler-token van de show (`Authorization: Bearer …`), zodat de pincode
+nooit in een speelpakket hoeft. De Knal-meter van de Showcomposer schrijft per optreden een
+score terug (`actie: uitslag`); de zanger ziet die op zijn telefoon, iedereen ziet het
+leaderboard. Opmaak in de Knal-huisstijl: Bebas Neue en Montserrat (via `next/font`, in de
+site zelf), het roze-oranje verloop en één collage-accent, de gouden microfoon uit de decorset
+(`public/microfoon.webp`).
 
 Stack: Next.js (App Router) + TypeScript + Tailwind, Upstash Redis als datastore, live updates
-via polling elke 4 seconden. Draait op Vercel zonder verdere infrastructuur.
+via polling elke 4 seconden (de Speler van de Showcomposer elke 2 seconden). Draait op Vercel zonder verdere infrastructuur.
 
 ---
 
@@ -24,7 +35,8 @@ cp .env.example .env.local     # vul UPSTASH_* en HOST_PIN in
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000/host, maak een show en open de QR-link. Gebruik `localhost`, niet
+`127.0.0.1`: de dev-server van Next 16 weigert zijn scripts voor een ander adres.
 
 ### Zonder Upstash-account
 
@@ -174,9 +186,15 @@ staat ziet iedereen "🎲 verrassingskeuze". Skipt de host het alsnog, dan verva
 
 ## Datamodel (Redis)
 
+Alle sleutels van een show staan onder `s:{code}:` (in de tabel zonder dat voorvoegsel, behalve
+`show:{code}`).
+
 | Sleutel | Type | Inhoud |
 | --- | --- | --- |
-| `req:{id}` | hash | `songId`, `titel`, `artiest`, `zangerNaam`, `extraSingers`, `deviceId`, `createdAt`, `arrivalSeq`, `status`, `lastConfirmedAt`, `missedCheckins`, `stilstandRondes`, `vorigePositie`, `verrassingOp` |
+| `show:{code}` | hash | `naam`, `aangemaakt`, `spelerToken` (48 uur) |
+| `s:{code}:snapshot` | string | de momentopname van de hele rij als JSON |
+| `s:{code}:gescoord` | set | aanvragen met een score van de Knal-meter (leaderboard) |
+| `req:{id}` | hash | `songId`, `titel`, `artiest`, `zangerNaam`, `extraSingers`, `deviceId`, `createdAt`, `arrivalSeq`, `status`, `lastConfirmedAt`, `missedCheckins`, `stilstandRondes`, `vorigePositie`, `verrassingOp`, en na het zingen `score`, `labels`, `gescoordOp` |
 | `live` | set | ids van aanvragen die nog leven (`queued`, `playing` of `paused`) |
 | `ronde:stemmen` | hash | `deviceId` → `requestId` van de lopende ronde; één veld per telefoon |
 | `ronde:nummer` | string | aantal afgerekende rondes (de lopende ronde is er eentje verder) |
@@ -208,7 +226,10 @@ De gratis tier geeft 10.000 commando's per dag. Met twintig telefoons die elke 4
 pollen, zou dat binnen een half uur op zijn. Daarom houdt de server de rij-toestand 3 seconden
 vast in het geheugen van de serverless-instantie (`SNAPSHOT_TTL_MS` in `lib/queue.ts`): alle
 gasten die in dat venster pollen krijgen dezelfde momentopname, en elke wijziging gooit hem
-meteen weg zodat je je eigen actie direct terugziet.
+meteen weg zodat je je eigen actie direct terugziet. Daarnaast staat de momentopname als één
+JSON-sleutel in Redis (`s:{code}:snapshot`), zodat ook een verse instantie hem met één commando
+leest, en wachten gelijktijdige verzoeken op dezelfde lezing. Gemeten in `test:api`: 200 keer
+pollen zonder wijziging kost 1 commando; een avond van vier uur naar schatting 13.000.
 
 Bij een groot feest of een lange avond kan het alsnog krap worden. Knoppen om aan te draaien:
 

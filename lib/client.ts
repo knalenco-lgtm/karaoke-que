@@ -3,6 +3,41 @@
 const DEVICE_KEY = 'karaoke.deviceId';
 const NAAM_KEY = 'karaoke.naam';
 const PIN_KEY = 'karaoke.hostPin';
+const SHOW_KEY = 'karaoke.show';
+
+/**
+ * De show-code van deze avond (fase 13): uit `?s=` in de link (de QR-code), anders de laatst
+ * gebruikte. Elke API-aanroep krijgt hem mee.
+ */
+let huidigeShow = '';
+
+export function getShow(): string {
+  const uitLink = new URLSearchParams(window.location.search).get('s');
+  if (uitLink) {
+    const code = uitLink.toUpperCase().replace(/[\s-]/g, '');
+    localStorage.setItem(SHOW_KEY, code);
+    huidigeShow = code;
+    return code;
+  }
+  huidigeShow = localStorage.getItem(SHOW_KEY) ?? '';
+  return huidigeShow;
+}
+
+export function setShow(code: string): void {
+  huidigeShow = code;
+  if (code) localStorage.setItem(SHOW_KEY, code);
+  else localStorage.removeItem(SHOW_KEY);
+  // De link in de adresbalk meenemen, zodat herladen en delen dezelfde show houden.
+  const url = new URL(window.location.href);
+  if (code) url.searchParams.set('s', code);
+  else url.searchParams.delete('s');
+  window.history.replaceState(null, '', url);
+}
+
+/** De link naar de gastenpagina van een show, voor de QR-code. */
+export function gastenLink(code: string): string {
+  return `${window.location.origin}/?s=${encodeURIComponent(code)}`;
+}
 
 /** Stabiele, anonieme identiteit per apparaat. Geen accounts, geen login. */
 export function getDeviceId(): string {
@@ -54,6 +89,9 @@ export async function api<T = unknown>(
   opties: { method?: string; body?: unknown; pin?: string } = {}
 ): Promise<T> {
   let res: Response;
+  if (huidigeShow && !/[?&]s=/.test(url) && url.startsWith('/api/') && !url.startsWith('/api/songs')) {
+    url += (url.includes('?') ? '&' : '?') + 's=' + encodeURIComponent(huidigeShow);
+  }
   try {
     res = await fetch(url, {
       method: opties.method ?? 'GET',

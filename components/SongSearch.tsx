@@ -74,7 +74,7 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
 
   if (geblokkeerdeReden) {
     return (
-      <div className="kaart px-4 py-5 text-center text-sm text-fuchsia-200/80">
+      <div className="kaart px-4 py-5 text-center text-sm text-tekst/80">
         {geblokkeerdeReden}
       </div>
     );
@@ -83,18 +83,18 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
   if (gekozen) {
     return (
       <div className="kaart gloed p-4">
-        <p className="text-xs uppercase tracking-widest text-fuchsia-300/70">Aanvragen?</p>
+        <p className="text-xs uppercase tracking-widest text-tekst/70">Aanvragen?</p>
         <p className="mt-2 text-xl leading-tight font-semibold">{gekozen.titel}</p>
-        <p className="text-fuchsia-200/70">{gekozen.artiest}</p>
+        <p className="text-tekst/70">{gekozen.artiest}</p>
 
         <div className="mt-4 border-t border-white/10 pt-4">
-          <p className="mb-2 text-xs font-semibold tracking-widest text-fuchsia-300/70 uppercase">
+          <p className="mb-2 kop text-base tracking-[0.16em] text-tekst/70 uppercase">
             Wie zingt er mee?
           </p>
 
           <div className="flex min-h-14 items-center rounded-xl border border-white/10 bg-white/5 px-4">
             <span className="truncate font-semibold">{zangerNaam}</span>
-            <span className="ml-2 shrink-0 text-sm text-fuchsia-200/50">(jij)</span>
+            <span className="ml-2 shrink-0 text-sm text-tekst/50">(jij)</span>
           </div>
 
           {extraZangers.map((naam, i) => (
@@ -110,15 +110,15 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
                 placeholder={`Naam zanger ${i + 2}`}
                 maxLength={MAX_EXTRA_ZANGER_LENGTE}
                 autoFocus
-                className="kaart min-h-14 min-w-0 flex-1 px-4 placeholder:text-fuchsia-200/40
-                           focus:ring-2 focus:ring-fuchsia-400/60 focus:outline-none"
+                className="kaart min-h-14 min-w-0 flex-1 px-4 placeholder:text-tekst/40
+                           focus:ring-2 focus:ring-roze/60 focus:outline-none"
               />
               <button
                 type="button"
                 onClick={() => setExtraZangers((huidig) => huidig.filter((_, j) => j !== i))}
                 aria-label={`Zanger ${i + 2} verwijderen`}
                 className="min-h-14 w-14 shrink-0 rounded-xl border border-white/15 text-xl
-                           text-fuchsia-100/70 active:bg-white/10"
+                           text-tekst/70 active:bg-white/10"
               >
                 ×
               </button>
@@ -129,13 +129,13 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
             <button
               type="button"
               onClick={() => setExtraZangers((huidig) => [...huidig, ''])}
-              className="mt-2 min-h-12 w-full rounded-xl border border-dashed border-fuchsia-400/40
-                         text-sm font-semibold text-fuchsia-200/80 active:bg-fuchsia-500/15"
+              className="mt-2 min-h-12 w-full rounded-xl border border-dashed border-roze/40
+                         text-sm font-semibold text-tekst/80 active:bg-roze/15"
             >
               + Zanger toevoegen
             </button>
           )}
-          <p className="mt-2 text-xs text-fuchsia-200/40">
+          <p className="mt-2 text-xs text-tekst/40">
             Samen zingen? Maximaal {MAX_EXTRA_ZANGERS + 1} zangers per nummer.
           </p>
         </div>
@@ -147,8 +147,8 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
             type="button"
             onClick={bevestig}
             disabled={verzendt}
-            className="min-h-14 flex-1 rounded-xl bg-fuchsia-500 text-lg font-bold text-white
-                       active:bg-fuchsia-600 disabled:opacity-50"
+            className="min-h-14 flex-1 rounded-xl knop-verloop text-lg font-bold text-white
+                       active:brightness-90 disabled:opacity-50"
           >
             {verzendt ? 'Bezig…' : 'Ja, zet in de rij'}
           </button>
@@ -161,7 +161,7 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
             }}
             disabled={verzendt}
             className="min-h-14 rounded-xl border border-white/15 px-5 font-medium
-                       text-fuchsia-100/80 active:bg-white/10 disabled:opacity-50"
+                       text-tekst/80 active:bg-white/10 disabled:opacity-50"
           >
             Terug
           </button>
@@ -182,11 +182,11 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
           autoCorrect="off"
           spellCheck={false}
           enterKeyHint="search"
-          className="kaart min-h-14 w-full px-4 text-base placeholder:text-fuchsia-200/40
-                     focus:outline-none focus:ring-2 focus:ring-fuchsia-400/60"
+          className="kaart min-h-14 w-full px-4 text-base placeholder:text-tekst/40
+                     focus:outline-none focus:ring-2 focus:ring-roze/60"
         />
         {zoekt && (
-          <span className="puls absolute top-1/2 right-4 -translate-y-1/2 text-xs text-fuchsia-300/70">
+          <span className="puls absolute top-1/2 right-4 -translate-y-1/2 text-xs text-tekst/70">
             zoeken…
           </span>
         )}
@@ -195,7 +195,7 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
       {fout && <p className="mt-2 text-sm text-rose-300">{fout}</p>}
 
       {term.length >= 2 && !zoekt && resultaten.length === 0 && (
-        <p className="mt-3 px-1 text-sm text-fuchsia-200/60">
+        <p className="mt-3 px-1 text-sm text-tekst/60">
           Niks gevonden in de KaraFun-catalogus. Probeer een andere spelling.
         </p>
       )}
@@ -211,11 +211,11 @@ export function SongSearch({ zangerNaam, onAanvragen, geblokkeerdeReden }: Props
                   setFout(null);
                 }}
                 className="kaart flex min-h-14 w-full items-center px-4 py-3 text-left
-                           active:bg-fuchsia-500/20"
+                           active:bg-roze/20"
               >
                 <span className="min-w-0">
                   <span className="block truncate font-semibold">{song.titel}</span>
-                  <span className="block truncate text-sm text-fuchsia-200/60">{song.artiest}</span>
+                  <span className="block truncate text-sm text-tekst/60">{song.artiest}</span>
                 </span>
               </button>
             </li>

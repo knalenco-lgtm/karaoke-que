@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { QueueRow } from '@/components/QueueRow';
 import type { QueueEntry } from '@/lib/types';
 import { useQueue } from '@/components/useQueue';
-import { api, ApiFout, getPin, setPin, wisPin } from '@/lib/client';
+import { api, ApiFout, getPin, getShow, setPin, setShow, wisPin } from '@/lib/client';
+import { Merk } from '@/components/Merk';
 import {
   GROTE_RIJ_VANAF,
   SPRONG_KORTE_RIJ,
@@ -16,25 +17,130 @@ import { zangersTekst } from '@/lib/zangers';
 
 export default function HostPagina() {
   const [pin, setPinState] = useState<string | null>(null);
+  const [show, setShowState] = useState<string | null>(null);
 
   // Zie de gastenpagina: localStorage pas na hydratie lezen.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setPinState(getPin()), []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPinState(getPin());
+    setShowState(getShow());
+  }, []);
 
   if (pin === null) {
     return (
       <main className="flex flex-1 items-center justify-center">
-        <p className="puls text-fuchsia-200/60">Laden…</p>
+        <p className="puls text-tekst/60">Laden…</p>
       </main>
     );
   }
   if (pin === '') return <PinScherm onOk={setPinState} />;
+  if (!show) {
+    return (
+      <ShowKiezen
+        pin={pin}
+        onShow={(code) => {
+          setShow(code);
+          setShowState(code);
+        }}
+      />
+    );
+  }
 
-  return <HostPaneel pin={pin} onUitloggen={() => setPinState('')} />;
+  return (
+    <HostPaneel
+      key={show}
+      pin={pin}
+      code={show}
+      onAndereShow={() => {
+        setShow('');
+        setShowState('');
+      }}
+      onUitloggen={() => setPinState('')}
+    />
+  );
 }
 
-function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void }) {
-  const { data, fout, ververs } = useQueue(null);
+/**
+ * Fase 13: na de pincode kiest de host de show van vanavond, of maakt hij een nieuwe. Elke show
+ * heeft een eigen wachtrij en een eigen QR-code, zodat twee hosts op één avond elk een rij hebben.
+ */
+function ShowKiezen({ pin, onShow }: { pin: string; onShow: (code: string) => void }) {
+  const [naam, setNaamState] = useState('');
+  const [code, setCode] = useState('');
+  const [fout, setFout] = useState<string | null>(null);
+  const [bezig, setBezig] = useState(false);
+
+  async function nieuw(e: React.FormEvent) {
+    e.preventDefault();
+    setBezig(true);
+    setFout(null);
+    try {
+      const r = await api<{ code: string }>('/api/show', { method: 'POST', body: { naam }, pin });
+      onShow(r.code);
+    } catch (error) {
+      setFout(error instanceof ApiFout ? error.message : 'Aanmaken mislukt.');
+    } finally {
+      setBezig(false);
+    }
+  }
+
+  async function bestaand(e: React.FormEvent) {
+    e.preventDefault();
+    setBezig(true);
+    setFout(null);
+    const c = code.toUpperCase().replace(/[\s-]/g, '');
+    try {
+      await api('/api/host', { method: 'POST', body: { actie: 'login', show: c }, pin });
+      onShow(c);
+    } catch (error) {
+      setFout(error instanceof ApiFout ? error.message : 'Deze show bestaat niet.');
+    } finally {
+      setBezig(false);
+    }
+  }
+
+  const veld =
+    'kaart min-h-14 w-full px-4 text-center text-lg placeholder:text-tekst/40 focus:ring-2 focus:ring-roze/60 focus:outline-none';
+  return (
+    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-5 py-10">
+      <Merk titel="Host" groot />
+      {fout && <p className="mt-4 text-center text-sm text-rose-300">{fout}</p>}
+      <form className="mt-6" onSubmit={nieuw}>
+        <p className="kop mb-2 text-base tracking-[0.16em] text-tekst/60">Nieuwe show</p>
+        <input className={veld} value={naam} onChange={(e) => setNaamState(e.target.value)} placeholder="Naam, bijvoorbeeld Kerstborrel Acme" maxLength={80} />
+        <button type="submit" disabled={bezig} className="knop-verloop mt-3 min-h-14 w-full rounded-xl text-lg font-bold active:brightness-90 disabled:opacity-40">
+          Show maken
+        </button>
+      </form>
+      <form className="mt-8" onSubmit={bestaand}>
+        <p className="kop mb-2 text-base tracking-[0.16em] text-tekst/60">Of verder met een show</p>
+        <input
+          className={`${veld} kop text-3xl tracking-[0.3em]`}
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="CODE"
+          autoCapitalize="characters"
+          autoComplete="off"
+          maxLength={14}
+        />
+        <button
+          type="submit"
+          disabled={bezig || code.trim().length < 3}
+          className="mt-3 min-h-12 w-full rounded-xl border border-white/15 text-sm font-semibold text-tekst/80 active:bg-white/10 disabled:opacity-40"
+        >
+          Openen
+        </button>
+      </form>
+      <p className="mt-6 text-center text-xs text-tekst/40">Een show blijft twee dagen bestaan. Stuurt de Showcomposer de karaoke, dan maakt die de show.</p>
+    </main>
+  );
+}
+
+function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; code: string; onAndereShow: () => void; onUitloggen: () => void }) {
+  const { data, fout, foutCode, ververs } = useQueue(null);
+  useEffect(() => {
+    if (foutCode === 'SHOW' || foutCode === 'CODE') onAndereShow();
+  }, [foutCode, onAndereShow]);
   const [bezigId, setBezigId] = useState<string | null>(null);
   const [melding, setMelding] = useState<{ tekst: string; fout: boolean } | null>(null);
   /** Het nummer waarvoor om bevestiging gevraagd wordt, tegen misklikken. */
@@ -100,28 +206,43 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 pt-5 pb-16">
-      <header className="mb-5 flex items-baseline justify-between">
-        <h1 className="text-2xl font-black tracking-tight">
-          Host<span className="text-neon">.</span>
-        </h1>
-        <button
-          type="button"
-          onClick={() => {
-            wisPin();
-            onUitloggen();
-          }}
-          className="text-sm text-fuchsia-200/60 underline-offset-4 hover:underline"
-        >
-          Vergrendelen
-        </button>
-      </header>
+      <Merk
+        titel="Host"
+        show={data?.show.naam}
+        rechts={
+          <div className="flex flex-col items-end gap-1 pb-1 text-sm">
+            <button
+              type="button"
+              onClick={() => {
+                wisPin();
+                onUitloggen();
+              }}
+              className="text-tekst/60 underline-offset-4 hover:underline"
+            >
+              Vergrendelen
+            </button>
+            <button type="button" onClick={onAndereShow} className="text-tekst/60 underline-offset-4 hover:underline">
+              Andere show
+            </button>
+          </div>
+        }
+      />
+      <div className="kaart mb-4 flex items-center justify-between gap-3 px-4 py-3">
+        <div>
+          <p className="kop text-base tracking-[0.16em] text-tekst/60">Show-code</p>
+          <p className="kop verlooptekst text-4xl leading-none tracking-[0.2em]">{code}</p>
+        </div>
+        <a href={`/qr?s=${encodeURIComponent(code)}`} className="min-h-12 rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-tekst/80 active:bg-white/10">
+          QR-code
+        </a>
+      </div>
 
       {melding && (
         <p
           className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
             melding.fout
               ? 'border-rose-400/30 bg-rose-500/10 text-rose-200'
-              : 'border-lime-400/30 bg-lime-400/10 text-lime-100'
+              : 'border-oranje/30 bg-oranje/10 text-tekst'
           }`}
         >
           {melding.tekst}
@@ -142,9 +263,9 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
             ? `Trekt willekeurig een nummer van buiten de top ${VERRASSING_BESCHERMDE_TOP} naar voren`
             : `vanaf ${VERRASSING_MIN_RIJ} nummers`
         }
-        className="mb-4 min-h-14 w-full rounded-xl border border-limoen/50 bg-limoen/10 text-base
-                   font-bold text-limoen active:bg-limoen/25 disabled:border-white/10
-                   disabled:bg-transparent disabled:text-fuchsia-200/40"
+        className="mb-4 min-h-14 w-full rounded-xl border border-oranje/50 bg-oranje/10 text-base
+                   font-bold text-oranje-licht active:bg-oranje/25 disabled:border-white/10
+                   disabled:bg-transparent disabled:text-tekst/40"
       >
         {bezigId === 'verrassing' ? 'Bezig…' : '🎲 Verrassing'}
         {!magVerrassen && (
@@ -153,25 +274,25 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
       </button>
 
       {data && data.wachtrij.length === 0 && (
-        <p className="kaart px-4 py-6 text-center text-sm text-fuchsia-200/60">
+        <p className="kaart px-4 py-6 text-center text-sm text-tekst/60">
           De wachtrij is leeg.
         </p>
       )}
 
       {data?.nuAanDeBeurt && (
         <div className="kaart gloed mb-4 px-4 py-3">
-          <p className="text-xs font-semibold tracking-widest text-fuchsia-300/70 uppercase">
+          <p className="kop text-base tracking-[0.16em] text-tekst/70 uppercase">
             Nu aan de beurt
           </p>
           <p className="mt-1 font-bold">{data.nuAanDeBeurt.titel}</p>
-          <p className="text-sm text-fuchsia-200/60">
+          <p className="text-sm text-tekst/60">
             {data.nuAanDeBeurt.artiest} · {zangersTekst(data.nuAanDeBeurt.zangerNaam, data.nuAanDeBeurt.extraSingers)}
           </p>
         </div>
       )}
 
       {rijLengte > 0 && (
-        <p className="mb-2 px-1 text-xs text-fuchsia-200/50">
+        <p className="mb-2 px-1 text-xs text-tekst/50">
           Tik het nummer aan dat nu gaat zingen. Dat rekent meteen de stemronde af en start een
           nieuwe.
         </p>
@@ -186,7 +307,7 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
             eerstvolgende={i === 0}
             onKlik={() => setTeStarten(entry)}
             acties={
-              <span className="flex w-12 shrink-0 flex-col items-center justify-center rounded-xl border border-white/10 py-1 text-fuchsia-200/70">
+              <span className="flex w-12 shrink-0 flex-col items-center justify-center rounded-xl border border-white/10 py-1 text-tekst/70">
                 <span aria-hidden="true" className="text-sm leading-none">
                   ▲
                 </span>
@@ -202,7 +323,7 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
                     hostActie('skip', entry.id);
                   }}
                   disabled={bezigId === entry.id + 'skip'}
-                  className={`${knop} border-white/15 text-fuchsia-100/80 active:bg-white/10`}
+                  className={`${knop} border-white/15 text-tekst/80 active:bg-white/10`}
                 >
                   Skip ↓
                 </button>
@@ -230,14 +351,14 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
         >
           <div className="kaart gloed w-full max-w-sm p-6 text-center">
-            <p className="text-xs font-semibold tracking-widest text-fuchsia-300/70 uppercase">
+            <p className="kop text-base tracking-[0.16em] text-tekst/70 uppercase">
               Starten?
             </p>
             <p className="mt-2 text-xl leading-tight font-bold text-balance">{teStarten.titel}</p>
-            <p className="mt-1 text-fuchsia-200/70">
+            <p className="mt-1 text-tekst/70">
               {zangersTekst(teStarten.zangerNaam, teStarten.extraSingers)}
             </p>
-            <p className="mt-3 text-xs text-fuchsia-200/50">
+            <p className="mt-3 text-xs text-tekst/50">
               De lopende stemronde wordt afgerekend en er begint een nieuwe.
             </p>
 
@@ -245,8 +366,8 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
               type="button"
               onClick={() => start(teStarten)}
               disabled={bezigId === teStarten.id + 'start'}
-              className="mt-5 min-h-14 w-full rounded-xl bg-lime-400 text-lg font-black text-black
-                         active:bg-lime-500 disabled:opacity-50"
+              className="mt-5 min-h-14 w-full rounded-xl knop-verloop text-lg font-black text-white
+                         active:brightness-90 disabled:opacity-50"
             >
               Ja, starten ▶
             </button>
@@ -254,7 +375,7 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
               type="button"
               onClick={() => setTeStarten(null)}
               className="mt-3 min-h-12 w-full rounded-xl border border-white/15 text-sm
-                         text-fuchsia-100/70 active:bg-white/10"
+                         text-tekst/70 active:bg-white/10"
             >
               Annuleren
             </button>
@@ -264,14 +385,14 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
 
       {data && data.gepauzeerd.length > 0 && (
         <section className="mt-8">
-          <h2 className="mb-2 px-1 text-xs font-semibold tracking-widest text-fuchsia-300/70 uppercase">
+          <h2 className="mb-2 px-1 kop text-base tracking-[0.16em] text-tekst/70 uppercase">
             Gepauzeerd (check-in gemist)
           </h2>
           <ul className="flex flex-col gap-2">
             {data.gepauzeerd.map((entry) => (
               <li key={entry.id} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                <p className="truncate font-semibold text-fuchsia-100/70">{entry.titel}</p>
-                <p className="truncate text-sm text-fuchsia-200/40">
+                <p className="truncate font-semibold text-tekst/70">{entry.titel}</p>
+                <p className="truncate text-sm text-tekst/40">
                   {entry.artiest} · door {zangersTekst(entry.zangerNaam, entry.extraSingers)} ·{' '}
                   {entry.stemmen} stemmen
                 </p>
@@ -280,7 +401,7 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
                     type="button"
                     onClick={() => hostActie('herstel', entry.id)}
                     disabled={bezigId === entry.id + 'herstel'}
-                    className={`${knop} border-lime-400/50 bg-lime-400/15 text-lime-200 active:bg-lime-400/30`}
+                    className={`${knop} border-oranje/50 bg-oranje/15 text-tekst active:bg-oranje/30`}
                   >
                     Terug in de rij
                   </button>
@@ -299,7 +420,7 @@ function HostPaneel({ pin, onUitloggen }: { pin: string; onUitloggen: () => void
         </section>
       )}
 
-      <p className="mt-10 text-center text-xs text-fuchsia-200/40">
+      <p className="mt-10 text-center text-xs text-tekst/40">
         Volgorde van binnenkomst · de rondewinnaar springt {SPRONG_KORTE_RIJ} plek vooruit
         ({SPRONG_VOLLE_RIJ} vanaf {GROTE_RIJ_VANAF} nummers)
       </p>
@@ -329,8 +450,8 @@ function PinScherm({ onOk }: { onOk: (pin: string) => void }) {
 
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-5 py-10">
-      <h1 className="text-center text-3xl font-black tracking-tight">Hostpaneel</h1>
-      <p className="mt-3 text-center text-fuchsia-100/70">Voer de pincode in.</p>
+      <Merk titel="Host" groot />
+      <p className="mt-3 text-center text-tekst/70">Voer de pincode in.</p>
 
       <form className="mt-7" onSubmit={verstuur}>
         <input
@@ -342,15 +463,15 @@ function PinScherm({ onOk }: { onOk: (pin: string) => void }) {
           placeholder="••••"
           autoFocus
           className="kaart min-h-14 w-full px-4 text-center text-2xl tracking-[0.5em]
-                     placeholder:tracking-normal placeholder:text-fuchsia-200/40
-                     focus:outline-none focus:ring-2 focus:ring-fuchsia-400/60"
+                     placeholder:tracking-normal placeholder:text-tekst/40
+                     focus:outline-none focus:ring-2 focus:ring-roze/60"
         />
         {fout && <p className="mt-3 text-center text-sm text-rose-300">{fout}</p>}
         <button
           type="submit"
           disabled={bezig || waarde.length === 0}
-          className="mt-4 min-h-14 w-full rounded-xl bg-fuchsia-500 text-lg font-bold text-white
-                     active:bg-fuchsia-600 disabled:opacity-40"
+          className="mt-4 min-h-14 w-full rounded-xl knop-verloop text-lg font-bold text-white
+                     active:brightness-90 disabled:opacity-40"
         >
           {bezig ? 'Bezig…' : 'Ontgrendelen'}
         </button>

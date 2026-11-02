@@ -1,26 +1,25 @@
 import type { Metadata, Viewport } from 'next';
-import { Outfit } from 'next/font/google';
+import { Bebas_Neue, Montserrat } from 'next/font/google';
 import './globals.css';
 
-const outfit = Outfit({
-  variable: '--font-outfit',
-  subsets: ['latin'],
-});
+// Next.js zet de lettertypen bij het bouwen in de site zelf: geen verzoek naar Google bij de gast.
+const bebas = Bebas_Neue({ variable: '--font-bebas', weight: '400', subsets: ['latin'] });
+const montserrat = Montserrat({ variable: '--font-montserrat', subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Karaoke',
+  title: 'Karaoke · Knal & Co.',
   description: 'Vraag je nummer aan en stem op de wachtrij.',
 };
 
 export const viewport: Viewport = {
-  themeColor: '#0a0510',
+  themeColor: '#120e18',
   // Voorkomt dat iOS inzoomt bij het focussen van de zoekbalk.
   maximumScale: 1,
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="nl" className={`${outfit.variable} h-full antialiased`}>
+    <html lang="nl" className={`${bebas.variable} ${montserrat.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col font-sans">{children}</body>
     </html>
   );

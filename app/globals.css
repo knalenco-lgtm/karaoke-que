@@ -1,42 +1,76 @@
 @import 'tailwindcss';
 
+/*
+ * Knal-huisstijl (fase 13): donker (#120E18), het roze-oranje verloop als accent, koppen in
+ * Bebas Neue, tekst in Montserrat. Strak, want het is een telefoonscherm; één collage-accent:
+ * de gouden microfoon uit de decorset.
+ */
 @theme {
-  --color-neon: #f0abfc;
-  --color-neon-2: #22d3ee;
-  --color-limoen: #a3e635;
+  --color-roze: #f03786;
+  --color-oranje: #ff7a1a;
+  --color-oranje-licht: #ff8c2a;
+  --color-paars: #8e2da8;
+  --color-inkt: #120e18;
+  --color-tekst: #f5eef7;
+  --color-goed: #3ddc84;
 
-  --font-sans: var(--font-outfit), system-ui, sans-serif;
+  --font-sans: var(--font-montserrat), system-ui, sans-serif;
+  --font-display: var(--font-bebas), 'Arial Narrow', sans-serif;
 }
 
 html {
-  background: #0a0510;
+  background: #120e18;
   color-scheme: dark;
 }
 
 body {
-  color: #f5f3ff;
+  color: #f5eef7;
   background:
-    radial-gradient(1100px 700px at 15% -10%, #4c1d95 0%, transparent 55%),
-    radial-gradient(900px 600px at 90% 5%, #831843 0%, transparent 50%),
-    radial-gradient(800px 900px at 50% 110%, #164e63 0%, transparent 55%),
-    #0a0510;
+    radial-gradient(900px 600px at 0% -10%, color-mix(in oklab, #f03786 28%, transparent) 0%, transparent 60%),
+    radial-gradient(800px 700px at 110% 110%, color-mix(in oklab, #ff7a1a 22%, transparent) 0%, transparent 60%),
+    #120e18;
   background-attachment: fixed;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Glazen kaart — de basisvorm voor alle rijen en panelen. */
+/* Kaart: de basisvorm voor rijen en panelen. */
 @utility kaart {
-  background: color-mix(in oklab, #1b0b2e 78%, transparent);
-  border: 1px solid color-mix(in oklab, #f0abfc 14%, transparent);
+  background: color-mix(in oklab, #ffffff 6%, transparent);
+  border: 1px solid color-mix(in oklab, #ffffff 12%, transparent);
   border-radius: 1rem;
   backdrop-filter: blur(8px);
 }
 
-/* Neonrand voor het nummer dat aan de beurt is. */
+/* Verlooprand voor het nummer dat aan de beurt is. */
 @utility gloed {
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, #f0abfc 45%, transparent),
-    0 0 28px color-mix(in oklab, #d946ef 35%, transparent);
+  border-color: transparent;
+  background:
+    linear-gradient(#1c1524, #1c1524) padding-box,
+    linear-gradient(135deg, #f03786, #ff7a1a 60%, #ff8c2a) border-box;
+  border: 2px solid transparent;
+  box-shadow: 0 10px 40px color-mix(in oklab, #f03786 30%, transparent);
+}
+
+/* De hoofdknop: het merkverloop. */
+@utility knop-verloop {
+  background: linear-gradient(135deg, #f03786, #ff7a1a 60%, #ff8c2a);
+  color: #fff;
+}
+
+/* Koppen in Bebas Neue, in kapitalen met ruime letterspatiëring. */
+@utility kop {
+  font-family: var(--font-display);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Tekst in het merkverloop. */
+@utility verlooptekst {
+  background: linear-gradient(135deg, #f03786, #ff7a1a 60%, #ff8c2a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 @keyframes puls-zacht {
@@ -51,6 +85,12 @@ body {
 
 .puls {
   animation: puls-zacht 1.8s ease-in-out infinite;
+}
+
+/* Het collage-accent: de microfoon staat licht schuin, met een zachte schaduw. */
+.microfoon {
+  transform: rotate(-8deg);
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55));
 }
 
 @media (prefers-reduced-motion: reduce) {

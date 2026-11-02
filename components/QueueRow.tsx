@@ -23,7 +23,7 @@ export function QueueRow({ entry, positie, eerstvolgende, acties, onderActies, o
       <div className="flex items-center gap-3">
         <span
           className={`w-9 shrink-0 text-center text-lg font-black tabular-nums ${
-            eerstvolgende ? 'text-neon' : 'text-fuchsia-300/50'
+            eerstvolgende ? 'text-roze' : 'text-tekst/50'
           }`}
           aria-label={`Positie ${positie}`}
         >
@@ -33,10 +33,10 @@ export function QueueRow({ entry, positie, eerstvolgende, acties, onderActies, o
         <div className="min-w-0 flex-1">
           <Badges entry={entry} positie={positie} />
           <p className="truncate leading-tight font-semibold">{entry.titel}</p>
-          <p className="truncate text-sm text-fuchsia-200/60">{entry.artiest}</p>
+          <p className="truncate text-sm text-tekst/60">{entry.artiest}</p>
           <p className="mt-0.5 truncate text-sm">
-            <span className="text-fuchsia-200/50">door </span>
-            <span className={entry.isMijn ? 'font-semibold text-neon' : 'text-fuchsia-100/90'}>
+            <span className="text-tekst/50">door </span>
+            <span className={entry.isMijn ? 'font-semibold text-roze' : 'text-tekst/90'}>
               {zangersTekst(entry.zangerNaam, entry.extraSingers)}
               {entry.isMijn && ' (jij)'}
             </span>
@@ -51,13 +51,13 @@ export function QueueRow({ entry, positie, eerstvolgende, acties, onderActies, o
   );
 
   const opmaak = `kaart px-3 py-3 ${eerstvolgende ? 'gloed' : ''} ${
-    entry.isMijn ? 'border-fuchsia-400/50' : ''
+    entry.isMijn ? 'border-roze/50' : ''
   }`;
 
   if (!onKlik) return <li className={opmaak}>{inhoud}</li>;
 
   return (
-    <li className={`${opmaak} cursor-pointer active:bg-fuchsia-500/15`} onClick={onKlik}>
+    <li className={`${opmaak} cursor-pointer active:bg-roze/15`} onClick={onKlik}>
       {inhoud}
     </li>
   );
@@ -72,7 +72,7 @@ function Badges({ entry, positie }: { entry: QueueEntry; positie: number }) {
   if (labels.length === 0) return null;
 
   return (
-    <p className="mb-0.5 flex flex-wrap gap-x-3 text-xs font-bold tracking-wide text-limoen">
+    <p className="mb-0.5 flex flex-wrap gap-x-3 text-xs font-bold tracking-wide text-oranje-licht">
       {labels.map((label) => (
         <span key={label}>{label}</span>
       ))}
@@ -107,10 +107,10 @@ export function StemKnop({
       className={`flex min-h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl border
                   transition-colors ${
                     entry.heeftMijnStem
-                      ? 'border-lime-400/70 bg-lime-400/20 text-lime-300'
+                      ? 'border-oranje/70 bg-oranje/20 text-oranje-licht'
                       : uit
-                        ? 'border-white/10 text-fuchsia-200/40'
-                        : 'border-fuchsia-400/50 bg-fuchsia-500/15 text-neon active:bg-fuchsia-500/35'
+                        ? 'border-white/10 text-tekst/40'
+                        : 'border-roze/50 bg-roze/15 text-roze active:bg-roze/35'
                   }`}
     >
       <span aria-hidden="true" className="text-lg leading-none">

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
+import { gastenLink, getShow } from '@/lib/client';
+import { Merk } from '@/components/Merk';
 
 /**
  * Toont een QR-code van de eigen URL. Client-side, want de juiste URL is pas
@@ -12,16 +14,25 @@ export default function QrPagina() {
   const [dataUrl, setDataUrl] = useState('');
   const [fout, setFout] = useState<string | null>(null);
 
+  const [code, setCode] = useState('');
+
   useEffect(() => {
-    const origin = window.location.origin;
+    // Fase 13: de QR-code wijst naar de gastenpagina van deze show (`?s=`).
+    const show = getShow();
+    if (!show) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFout('Geen show gekozen. Open de QR-code vanaf de hostpagina.');
+      return;
+    }
+    const doel = gastenLink(show);
     // De juiste URL is pas in de browser bekend.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setUrl(origin);
-    QRCode.toDataURL(origin, {
+    setCode(show);
+    setUrl(doel);
+    QRCode.toDataURL(doel, {
       width: 1024,
       margin: 2,
       errorCorrectionLevel: 'M',
-      color: { dark: '#0a0510ff', light: '#ffffffff' },
+      color: { dark: '#120e18ff', light: '#ffffffff' },
     })
       .then(setDataUrl)
       .catch(() => setFout('QR-code genereren mislukt.'));
@@ -29,10 +40,8 @@ export default function QrPagina() {
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-5 py-10 text-center">
-      <h1 className="text-3xl font-black tracking-tight">
-        Scan &amp; zing<span className="text-neon">.</span>
-      </h1>
-      <p className="mt-2 text-fuchsia-100/70">Richt je camera op de code om een nummer aan te vragen.</p>
+      <Merk titel="Scan en zing" groot />
+      <p className="mt-2 text-tekst/70">Richt je camera op de code om een nummer aan te vragen.</p>
 
       <div className="mt-7 rounded-3xl bg-white p-4">
         {dataUrl ? (
@@ -46,14 +55,15 @@ export default function QrPagina() {
         )}
       </div>
 
-      <p className="mt-5 font-mono text-sm break-all text-fuchsia-200/70">{url}</p>
+      {code && <p className="kop verlooptekst mt-5 text-5xl tracking-[0.25em]">{code}</p>}
+      <p className="mt-2 font-mono text-sm break-all text-tekst/70">{url}</p>
 
       {dataUrl && (
         <a
           href={dataUrl}
-          download="karaoke-qr.png"
+          download={`karaoke-qr-${code}.png`}
           className="mt-6 min-h-12 rounded-xl border border-white/15 px-5 py-3 text-sm font-semibold
-                     text-fuchsia-100/80 active:bg-white/10"
+                     text-tekst/80 active:bg-white/10"
         >
           Download PNG
         </a>
