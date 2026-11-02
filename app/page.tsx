@@ -160,7 +160,7 @@ function Gasten({ onVerlopen }: { onVerlopen: (melding: string) => void }) {
             !vol
               ? null
               : maxAanvragen === 1
-                ? `Het is druk in de rij, dus even één nummer per telefoon — zo komt iedereen aan de beurt. Zodra jouw nummer geweest is, mag je weer.`
+                ? `Het is druk in de rij, dus even één nummer per telefoon, zo komt iedereen aan de beurt. Zodra jouw nummer geweest is, mag je weer.`
                 : `Je hebt al ${maxAanvragen} nummers openstaan. Zodra er eentje geweest is, mag je weer.`
           }
         />
@@ -218,7 +218,7 @@ function Gasten({ onVerlopen }: { onVerlopen: (melding: string) => void }) {
         </h2>
 
         <p className="px-1 text-xs leading-relaxed text-tekst/70">
-          Wie het eerst komt, die het eerst zingt — de rondewinnaar springt vooruit.
+          Wie het eerst komt, die het eerst zingt. De rondewinnaar springt vooruit.
         </p>
 
         <Spelregels maxAanvragen={maxAanvragen} />
@@ -285,7 +285,7 @@ function Gasten({ onVerlopen }: { onVerlopen: (melding: string) => void }) {
 
         {data && data.wachtrij.length > 0 && (
           <p className="mt-2 px-1 text-xs text-tekst/40">
-            Eén stem per ronde — druk op een ander nummer om je stem te verplaatsen. Stemmen is
+            Eén stem per ronde. Druk op een ander nummer om je stem te verplaatsen. Stemmen is
             optioneel en anoniem.
           </p>
         )}
@@ -404,8 +404,8 @@ function MeldingStatusregel({
       <p className="text-xs text-tekst/50">
         🔕 Meldingen uit
         {status === 'default'
-          ? ' — mis niks als je aan de beurt bent'
-          : ' — zet ze aan via je browserinstellingen'}
+          ? '. Mis niks als je aan de beurt bent.'
+          : '. Zet ze aan via je browserinstellingen.'}
       </p>
       {status === 'default' && (
         <button
@@ -431,7 +431,7 @@ function Spelregels({ maxAanvragen }: { maxAanvragen: number }) {
         favoriet; de winnaar van de ronde springt {SPRONG_KORTE_RIJ} plekje vooruit (
         {SPRONG_VOLLE_RIJ} bij een volle rij, {GROTE_RIJ_VANAF}+). Daarna beginnen de stemmen
         opnieuw. Een nummer dat {BESCHERMING_NA_RONDES} rondes stilstaat kan niet nog eens worden
-        ingehaald. Stemmen is optioneel en anoniem. En onthoud: het is geen wedstrijd — het
+        ingehaald. Stemmen is optioneel en anoniem. En onthoud: het is geen wedstrijd, het
         belangrijkste is dat we er samen een gezellige avond van maken. 🎤
       </p>
       <ul className="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-tekst/70">
@@ -445,7 +445,7 @@ function Spelregels({ maxAanvragen }: { maxAanvragen: number }) {
           Op je eigen aanvraag stemmen kan niet.
         </li>
         <li>
-          Zing je samen met iemand? Voeg bij het aanvragen een extra zanger toe — maximaal{' '}
+          Zing je samen met iemand? Voeg bij het aanvragen een extra zanger toe, maximaal{' '}
           {MAX_EXTRA_ZANGERS + 1} per nummer.
         </li>
         <li>
@@ -480,7 +480,7 @@ function NuAanDeBeurt({ entry, laadt }: { entry: QueueEntry | null; laadt: boole
         </>
       ) : (
         <p className="mt-2 text-tekst/60">
-          Nog niks gestart — de spelleider kiest het eerste nummer.
+          Nog niks gestart. De spelleider kiest het eerste nummer.
         </p>
       )}
     </section>

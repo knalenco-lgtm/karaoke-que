@@ -171,9 +171,9 @@ function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; cod
           ? 'Er was niet gestemd, dus niemand sprong.'
           : w.gesprongen
             ? `"${w.titel}" won de ronde met ${w.stemmen} ${w.stemmen === 1 ? 'stem' : 'stemmen'} en sprong vooruit.`
-            : `"${w.titel}" won de ronde, maar gaat zelf zingen — geen sprong.`;
+            : `"${w.titel}" won de ronde, maar gaat zelf zingen, dus geen sprong.`;
         setMelding({
-          tekst: `▶ "${res.start.gestart.titel}" — ${res.start.gestart.zangerNaam}. ${uitslag} Ronde ${res.start.ronde} loopt.`,
+          tekst: `▶ "${res.start.gestart.titel}", ${res.start.gestart.zangerNaam}. ${uitslag} Ronde ${res.start.ronde} loopt.`,
           fout: false,
         });
       }

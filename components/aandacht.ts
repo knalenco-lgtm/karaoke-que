@@ -114,7 +114,7 @@ export function useBijnaAanDeBeurt(wachtrij: QueueEntry[]): void {
 
       if (positie === 1) {
         trilt([300, 120, 300]);
-        meldt('Jij bent aan de beurt! 🎤', `${entry.titel} — kom naar voren!`, `beurt-${entry.id}`);
+        meldt('Jij bent aan de beurt! 🎤', `${entry.titel}. Kom naar voren!`, `beurt-${entry.id}`);
       } else {
         trilt([200]);
         meldt(

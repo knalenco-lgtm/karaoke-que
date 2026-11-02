@@ -574,7 +574,7 @@ export async function maakAanvraag(code: string, input: {
 
   const zangerNaam = input.zangerNaam.trim().slice(0, MAX_ZANGER_LENGTE);
   if (zangerNaam.length < 1) throw new QueueError('Vul eerst je naam in.');
-  if (!input.deviceId) throw new QueueError('Onbekend apparaat — herlaad de pagina.');
+  if (!input.deviceId) throw new QueueError('Onbekend apparaat. Herlaad de pagina.');
 
   const extraSingers = normaliseerExtraZangers(input.extraSingers);
 
@@ -587,7 +587,7 @@ export async function maakAanvraag(code: string, input: {
   const { requests } = await leesToestand(code);
 
   if (requests.some((r) => r.songId === song.id)) {
-    throw new QueueError('Dit nummer staat al in de lijst — stem erop!', 409, 'DUBBEL');
+    throw new QueueError('Dit nummer staat al in de lijst. Stem erop!', 409, 'DUBBEL');
   }
 
   // Hoe voller de rij, hoe krapper de limiet: zo komen er meer verschillende
@@ -667,7 +667,7 @@ async function haalOp(code: string, requestId: string): Promise<KaraokeRequest> 
  * aantallen.
  */
 export async function stem(code: string, requestId: string, deviceId: string): Promise<{ stemmen: number }> {
-  if (!deviceId) throw new QueueError('Onbekend apparaat — herlaad de pagina.');
+  if (!deviceId) throw new QueueError('Onbekend apparaat. Herlaad de pagina.');
 
   const toestand = await leesToestand(code);
   const doel = toestand.requests.find((r) => r.id === requestId);
