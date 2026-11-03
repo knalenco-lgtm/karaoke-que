@@ -731,6 +731,19 @@ export async function hostToevoegen(code: string, input: {
   });
 }
 
+/**
+ * Een score uit het leaderboard halen (een testzanger; de Speler, 3 november 2026). De aanvraag zelf
+ * verandert niet; nogmaals weghalen doet niets.
+ */
+export async function uitslagWeg(code: string, requestId: string): Promise<{ weg: boolean }> {
+  const redis = getRedis();
+  const K = keys(code);
+  const weg = (await redis.srem(K.gescoord, requestId)) > 0;
+  await redis.hdel(K.request(requestId), 'score', 'labels', 'gescoordOp');
+  await vergeetSnapshot(code);
+  return { weg };
+}
+
 /** Scores aan of uit voor de hele show (de schakelaar op het presentatorscherm van de Speler). */
 export async function hostScores(code: string, aan: boolean): Promise<{ scoresAan: boolean }> {
   await getRedis().hset(SHOW_KEYS.show(code), { scoresUit: aan ? 0 : 1 });

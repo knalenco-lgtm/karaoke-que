@@ -1085,6 +1085,16 @@ async function faseDertien(show) {
   const weerAan = (await ah('/api/queue?deviceId=dev-score-0')).data;
   check('weer aan: de scores van eerder staan er weer', weerAan?.leaderboard?.length === 3 && weerAan.mijnUitslagen?.[0]?.score === 8000);
 
+  console.log('\nScore weghalen (Speler, 3 november 2026)');
+  const wegHalen = await host({ actie: 'uitslagweg', requestId: ids[2] });
+  check('een score weghalen lukt', wegHalen.status === 200 && wegHalen.data?.weg === true, JSON.stringify(wegHalen.data));
+  const naWeg = (await ah('/api/queue?deviceId=dev-score-2')).data;
+  check('...uit het leaderboard', naWeg?.leaderboard?.length === 2 && !naWeg.leaderboard.some((u) => u.id === ids[2]));
+  check('...en van de telefoon van die zanger', naWeg?.mijnUitslagen?.length === 0);
+  check('...de andere scores blijven', ((await ah('/api/leaderboard')).data?.leaderboard ?? []).map((u) => u.id).join() === [ids[1], ids[0]].join());
+  check('nogmaals weghalen doet niets', (await host({ actie: 'uitslagweg', requestId: ids[2] })).data?.weg === false);
+  check('weghalen zonder token of pin mag niet', (await ah('/api/host', { method: 'POST', body: { actie: 'uitslagweg', requestId: ids[0] } })).status === 401);
+
   console.log('\nNummer toevoegen door de host (Speler, 3 november 2026)');
   const kandidaten = (await api('/api/songs?q=queen')).data.resultaten;
   const rijVoor = (await ah('/api/queue')).data.wachtrij;

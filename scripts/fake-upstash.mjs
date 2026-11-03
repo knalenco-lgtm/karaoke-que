@@ -114,6 +114,13 @@ function voerUit(commando) {
     case 'teller-nul':
       teller = 0;
       return 'OK';
+    case 'hdel': {
+      const value = store.get(args[0]);
+      if (!(value instanceof Map)) return 0;
+      let verwijderd = 0;
+      for (const veld of args.slice(1)) if (value.delete(veld)) verwijderd++;
+      return verwijderd;
+    }
     case 'hgetall': {
       const value = store.get(args[0]);
       // Redis geeft een lege lijst voor een sleutel die niet bestaat, geen null.

@@ -5,6 +5,7 @@ import {
   hostScores,
   hostSkip,
   hostToevoegen,
+  uitslagWeg,
   hostStart,
   hostVerrassing,
   hostVerwijder,
@@ -59,6 +60,9 @@ export async function POST(request: Request) {
             volgende: body.volgende === true,
           }),
         });
+      case 'uitslagweg':
+        // Een score uit het leaderboard (een testzanger), ook van de telefoon van die zanger.
+        return NextResponse.json({ ok: true, ...(await uitslagWeg(code, requestId)) });
       case 'scores':
         // Scores aan of uit: uit = geen leaderboard en geen eigen score op de telefoons.
         return NextResponse.json({ ok: true, ...(await hostScores(code, body.aan !== false)) });
