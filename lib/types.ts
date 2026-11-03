@@ -30,6 +30,8 @@ export interface KaraokeRequest {
   vorigePositie: number;
   /** Tijdstip waarop de host dit nummer als verrassing naar voren trok (0 = nooit). */
   verrassingOp: number;
+  /** Door de host aangemeld (de Speler van de Showcomposer), niet door een gast. */
+  viaHost: boolean;
 }
 
 /** Zoals de client hem ziet. Bevat nooit wie er gestemd heeft, alleen aantallen. */
@@ -52,6 +54,8 @@ export interface QueueEntry {
   isWinnaarVorigeRonde: boolean;
   /** Door de host als verrassing naar voren getrokken (0 = nee). */
   verrassingOp: number;
+  /** Door de host aangemeld, niet door een gast. */
+  viaHost: boolean;
   /** Is deze aanvraag van het opvragende device? */
   isMijn: boolean;
   /** Heeft het opvragende device deze ronde op dit nummer gestemd? */
@@ -89,6 +93,11 @@ export interface Uitslag {
 export interface ShowInfo {
   code: string;
   naam: string;
+  /**
+   * Scores aan (standaard). Zet de host ze uit, dan geven leaderboard en eigen scores niets;
+   * de scores van eerder blijven bewaard en komen terug als ze weer aan gaan.
+   */
+  scoresAan: boolean;
 }
 
 export interface QueueResponse {

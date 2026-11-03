@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import {
   hostHerstel,
   hostKlaar,
+  hostScores,
   hostSkip,
+  hostToevoegen,
   hostStart,
   hostVerrassing,
   hostVerwijder,
@@ -46,6 +48,20 @@ export async function POST(request: Request) {
       case 'uitslag':
         // Fase 13: de score van de Knal-meter, zodat de zanger hem op zijn telefoon ziet.
         return NextResponse.json({ ok: true, uitslag: await uitslagBewaren(code, { requestId, score: body.score, labels: body.labels }) });
+      case 'toevoegen':
+        // De Speler meldt iemand aan ("Nummer toevoegen"), met de markering "via host".
+        return NextResponse.json({
+          ok: true,
+          toegevoegd: await hostToevoegen(code, {
+            songId: tekst(body.songId),
+            zangerNaam: tekst(body.zangerNaam),
+            extraSingers: body.extraSingers,
+            volgende: body.volgende === true,
+          }),
+        });
+      case 'scores':
+        // Scores aan of uit: uit = geen leaderboard en geen eigen score op de telefoons.
+        return NextResponse.json({ ok: true, ...(await hostScores(code, body.aan !== false)) });
       case 'skip':
         await hostSkip(code, requestId);
         break;

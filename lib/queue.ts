@@ -85,6 +85,7 @@ function parseRequest(id: string, raw: Record<string, unknown> | null): KaraokeR
     stilstandRondes: Number(raw.stilstandRondes ?? 0),
     vorigePositie: Number(raw.vorigePositie ?? 0),
     verrassingOp: Number(raw.verrassingOp ?? 0),
+    viaHost: raw.viaHost === 1 || raw.viaHost === '1' || raw.viaHost === true,
   };
 }
 
@@ -183,7 +184,7 @@ async function leesToestand(code: string): Promise<Toestand> {
   if (Object.keys(showRuw).length === 0) {
     throw new QueueError('Deze show-code bestaat niet (meer). Vraag de host om de juiste code.', 404, 'SHOW');
   }
-  const show: ShowInfo = { code, naam: String(showRuw.naam ?? '') };
+  const show: ShowInfo = { code, naam: String(showRuw.naam ?? ''), scoresAan: Number(showRuw.scoresUit ?? 0) !== 1 };
 
   const ruweStemmen = (results[1] as Record<string, unknown> | null) ?? {};
   const stemmen = new Map<string, string>(
@@ -270,6 +271,7 @@ function naarEntry(
     isBeschermd: isBeschermd(request),
     isWinnaarVorigeRonde: toestand.winnaarVorigeRonde === request.id,
     verrassingOp: request.verrassingOp,
+    viaHost: request.viaHost,
     isMijn,
     heeftMijnStem,
     // Op je huidige keuze nog eens drukken doet niets; verplaatsen doe je door
@@ -508,12 +510,14 @@ export async function leesWachtrij(code: string, deviceId: string | null): Promi
     }
   }
 
+  // Een momentopname van vóór de schakelaar kent `scoresAan` niet: dan aan.
+  const scoresAan = toestand.show.scoresAan !== false;
   const eigenAanvragen = deviceId
     ? toestand.requests.filter((r) => r.deviceId === deviceId).length
     : 0;
 
   return {
-    show: toestand.show,
+    show: { ...toestand.show, scoresAan },
     nuAanDeBeurt: spelend ? maakEntry(spelend) : null,
     wachtrij,
     gepauzeerd,
@@ -522,8 +526,8 @@ export async function leesWachtrij(code: string, deviceId: string | null): Promi
     mijnStem: deviceId ? (toestand.stemmen.get(deviceId) ?? null) : null,
     eigenAanvragen,
     maxAanvragen: maxAanvragenBij(wachtrij.length),
-    leaderboard: toestand.uitslagen.slice(0, LEADERBOARD).map((g) => naarUitslag(g, deviceId)),
-    mijnUitslagen: deviceId
+    leaderboard: scoresAan ? toestand.uitslagen.slice(0, LEADERBOARD).map((g) => naarUitslag(g, deviceId)) : [],
+    mijnUitslagen: scoresAan && deviceId
       ? toestand.uitslagen
           .filter((g) => g.deviceId === deviceId)
           .sort((a, b) => b.tijd - a.tijd)
@@ -651,6 +655,87 @@ export async function maakAanvraag(code: string, input: {
   await vergeetSnapshot(code);
 
   return { id };
+}
+
+/** Het apparaat-id van aanvragen die de host zelf aanmeldt; geldt niet voor de limiet per telefoon. */
+export const HOST_APPARAAT = 'host';
+
+/**
+ * De host meldt iemand aan (de Speler van de Showcomposer, "Nummer toevoegen"): zelfde catalogus en
+ * dezelfde controle op dubbele nummers als een gast, maar zonder limiet per telefoon en met de
+ * markering "via host". Achteraan, of met `volgende` direct onder het spelende nummer.
+ */
+export async function hostToevoegen(code: string, input: {
+  songId: string;
+  zangerNaam: string;
+  extraSingers?: unknown;
+  volgende?: boolean;
+}): Promise<{ id: string; positie: number }> {
+  const K = keys(code);
+  const zangerNaam = input.zangerNaam.trim().slice(0, MAX_ZANGER_LENGTE);
+  if (zangerNaam.length < 1) throw new QueueError('Vul de naam van de zanger in.');
+  const extraSingers = normaliseerExtraZangers(input.extraSingers);
+  const song = getSongById(input.songId);
+  if (!song) throw new QueueError('Dit nummer staat niet in de KaraFun-catalogus.', 404);
+
+  return metSlot(K, 'start', async () => {
+    const redis = getRedis();
+    await vergeetSnapshot(code);
+    const { requests } = await leesToestand(code);
+    if (requests.some((r) => r.songId === song.id)) {
+      throw new QueueError('Dit nummer staat al in de rij (of wordt nu gezongen).', 409, 'DUBBEL');
+    }
+    const wachtrij = requests.filter((r) => r.status === 'queued').sort(opVolgorde);
+    const nu = Date.now();
+    const [id, geteld] = await Promise.all([redis.incr(K.counter).then(String), redis.incr(K.seqCounter)]);
+    const hoogste = requests.reduce((max, r) => Math.max(max, r.arrivalSeq), 0);
+    let arrivalSeq = geteld;
+    if (arrivalSeq <= hoogste) {
+      arrivalSeq = hoogste + 1;
+      await redis.set(K.seqCounter, arrivalSeq);
+    }
+    const nieuw: KaraokeRequest = {
+      id,
+      songId: song.id,
+      titel: song.titel,
+      artiest: song.artiest,
+      zangerNaam,
+      extraSingers,
+      deviceId: HOST_APPARAAT,
+      createdAt: nu,
+      arrivalSeq,
+      status: 'queued',
+      lastConfirmedAt: nu,
+      missedCheckins: 0,
+      stilstandRondes: 0,
+      vorigePositie: 0,
+      verrassingOp: 0,
+      viaHost: true,
+    };
+    const pipe = redis.pipeline();
+    pipe.hset(K.request(id), { ...nieuw, extraSingers: JSON.stringify(extraSingers), viaHost: 1 });
+    // Als volgende: dezelfde volgnummers, met het nieuwe nummer vooraan.
+    if (input.volgende && wachtrij.length > 0) {
+      for (const { request, arrivalSeq: seq } of herverdeelVolgnummers([...wachtrij, nieuw], [nieuw, ...wachtrij])) {
+        pipe.hset(K.request(request.id), { arrivalSeq: seq });
+      }
+    }
+    pipe.sadd(K.live, id);
+    pipe.expire(K.request(id), SHOW_TTL_SEC);
+    pipe.expire(K.live, SHOW_TTL_SEC);
+    pipe.expire(K.counter, SHOW_TTL_SEC);
+    pipe.expire(K.seqCounter, SHOW_TTL_SEC);
+    await pipe.exec();
+    await vergeetSnapshot(code);
+    return { id, positie: input.volgende ? 1 : wachtrij.length + 1 };
+  });
+}
+
+/** Scores aan of uit voor de hele show (de schakelaar op het presentatorscherm van de Speler). */
+export async function hostScores(code: string, aan: boolean): Promise<{ scoresAan: boolean }> {
+  await getRedis().hset(SHOW_KEYS.show(code), { scoresUit: aan ? 0 : 1 });
+  await vergeetSnapshot(code);
+  return { scoresAan: aan };
 }
 
 async function haalOp(code: string, requestId: string): Promise<KaraokeRequest> {

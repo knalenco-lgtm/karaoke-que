@@ -1072,6 +1072,44 @@ async function faseDertien(show) {
   check('...ook als het nummer al klaar is (start van de volgende archiveert het)', lb.length === 3);
   check('het leaderboard van een andere show is leeg', ((await api('/api/leaderboard', { show: andere.code })).data?.leaderboard ?? []).length === 0);
 
+  console.log('\nScores aan en uit (Speler, 3 november 2026)');
+  check('standaard staan de scores aan', (await ah('/api/queue?deviceId=dev-score-0')).data?.show?.scoresAan === true);
+  const uit = await host({ actie: 'scores', aan: false });
+  check('scores uitzetten met het Speler-token lukt', uit.status === 200 && uit.data?.scoresAan === false, JSON.stringify(uit.data));
+  const zonder = (await ah('/api/queue?deviceId=dev-score-0')).data;
+  check('...dan geen leaderboard op de telefoon', zonder?.show?.scoresAan === false && zonder.leaderboard.length === 0);
+  check('...en geen eigen score', zonder?.mijnUitslagen?.length === 0);
+  check('...maar de Speler houdt het hele leaderboard', ((await ah('/api/leaderboard')).data?.leaderboard ?? []).length === 3);
+  check('scores uitzetten zonder token of pin mag niet', (await ah('/api/host', { method: 'POST', body: { actie: 'scores', aan: true } })).status === 401);
+  await host({ actie: 'scores', aan: true });
+  const weerAan = (await ah('/api/queue?deviceId=dev-score-0')).data;
+  check('weer aan: de scores van eerder staan er weer', weerAan?.leaderboard?.length === 3 && weerAan.mijnUitslagen?.[0]?.score === 8000);
+
+  console.log('\nNummer toevoegen door de host (Speler, 3 november 2026)');
+  const kandidaten = (await api('/api/songs?q=queen')).data.resultaten;
+  const rijVoor = (await ah('/api/queue')).data.wachtrij;
+  const bezet = new Set([...rijVoor.map((e) => e.songId), ...songs.map((x) => x.id)]);
+  const [hostA, hostB] = kandidaten.filter((x) => !bezet.has(x.id));
+  const t1 = await host({ actie: 'toevoegen', songId: hostA.id, zangerNaam: 'Kees', extraSingers: ['Mieke'] });
+  check('de host voegt een nummer toe', t1.status === 200 && t1.data?.toegevoegd?.id, JSON.stringify(t1.data));
+  let rij = (await ah('/api/queue?deviceId=dev-score-3')).data.wachtrij;
+  const achter = rij.at(-1);
+  check('...achteraan de rij', achter?.id === t1.data.toegevoegd.id && t1.data.toegevoegd.positie === rij.length);
+  check('...met de markering via host en de tweede zanger', achter?.viaHost === true && achter.extraSingers.join() === 'Mieke' && achter.zangerNaam === 'Kees');
+  check('...en gasten zijn niet "via host"', rij.filter((e) => e.id !== achter.id).every((e) => e.viaHost === false));
+  const t2 = await host({ actie: 'toevoegen', songId: hostB.id, zangerNaam: 'Lot', volgende: true });
+  rij = (await ah('/api/queue')).data.wachtrij;
+  check('als volgende: direct onder het spelende nummer', t2.status === 200 && rij[0]?.id === t2.data?.toegevoegd?.id && t2.data.toegevoegd.positie === 1, rij.map((e) => e.zangerNaam).join(', '));
+  check('...de rest schuift één plek op, in dezelfde volgorde', rij.slice(1).map((e) => e.id).join() === [...rijVoor.map((e) => e.id), t1.data.toegevoegd.id].join());
+  check('de host mag meer dan twee nummers (geen limiet per telefoon)', (await host({ actie: 'toevoegen', songId: kandidaten.find((x) => !bezet.has(x.id) && x.id !== hostA.id && x.id !== hostB.id).id, zangerNaam: 'Kees' })).status === 200);
+  const dubbelHost = await host({ actie: 'toevoegen', songId: hostA.id, zangerNaam: 'Piet' });
+  check('een nummer dat al in de rij staat wordt geweigerd', dubbelHost.status === 409 && dubbelHost.data?.code === 'DUBBEL');
+  check('een nummer buiten de catalogus wordt geweigerd', (await host({ actie: 'toevoegen', songId: 'bestaat-niet-999', zangerNaam: 'Piet' })).status === 404);
+  check('zonder naam wordt geweigerd', (await host({ actie: 'toevoegen', songId: kandidaten.at(-1).id, zangerNaam: ' ' })).status === 400);
+  check('toevoegen zonder token of pin mag niet', (await ah('/api/host', { method: 'POST', body: { actie: 'toevoegen', songId: hostA.id, zangerNaam: 'x' } })).status === 401);
+  const gestart = await host({ actie: 'start', requestId: t2.data.toegevoegd.id });
+  check('het host-nummer is gewoon te starten', gestart.status === 200 && (await ah('/api/queue')).data.nuAanDeBeurt?.viaHost === true);
+
   if (!EXTERN) {
     console.log('\nVerbruik (fase 13)');
     // Twintig telefoons pollen tien keer zonder dat er iets verandert: de momentopname in

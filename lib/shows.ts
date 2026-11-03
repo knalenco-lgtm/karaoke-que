@@ -42,7 +42,7 @@ export async function maakShow(input: { naam: unknown; code?: unknown }): Promis
     }
     await redis.hset(SHOW_KEYS.show(code), { aangemaakt: Date.now(), spelerToken });
     await redis.expire(SHOW_KEYS.show(code), SHOW_TTL_SEC);
-    return { code, naam, spelerToken };
+    return { code, naam, scoresAan: true, spelerToken };
   }
   throw new QueueError('Geen vrije show-code gevonden. Probeer het nog eens.', 503);
 }

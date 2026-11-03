@@ -66,6 +66,7 @@ export function QueueRow({ entry, positie, eerstvolgende, acties, onderActies, o
 function Badges({ entry, positie }: { entry: QueueEntry; positie: number }) {
   const labels: string[] = [];
   if (positie === 1 && entry.verrassingOp > 0) labels.push('🎲 verrassingskeuze');
+  if (entry.viaHost) labels.push('🎤 via host');
   if (entry.isWinnaarVorigeRonde) labels.push('🏆 winnaar vorige ronde');
   if (entry.isBeschermd) labels.push('🛡️ kan niet meer ingehaald worden');
 
