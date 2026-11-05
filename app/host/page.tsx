@@ -6,13 +6,7 @@ import type { QueueEntry } from '@/lib/types';
 import { useQueue } from '@/components/useQueue';
 import { api, ApiFout, getPin, getShow, setPin, setShow, wisPin } from '@/lib/client';
 import { Merk } from '@/components/Merk';
-import {
-  GROTE_RIJ_VANAF,
-  SPRONG_KORTE_RIJ,
-  SPRONG_VOLLE_RIJ,
-  VERRASSING_BESCHERMDE_TOP,
-  VERRASSING_MIN_RIJ,
-} from '@/lib/constants';
+import { VERRASSING_BESCHERMDE_TOP, VERRASSING_MIN_RIJ } from '@/lib/constants';
 import { zangersTekst } from '@/lib/zangers';
 
 export default function HostPagina() {
@@ -168,11 +162,7 @@ function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; cod
     try {
       const res = await api<{
         verrassing?: { titel: string; positie: number };
-        start?: {
-          gestart: { titel: string; zangerNaam: string };
-          winnaar: { titel: string; stemmen: number; gesprongen: boolean } | null;
-          ronde: number;
-        };
+        start?: { gestart: { titel: string; zangerNaam: string } };
       }>('/api/host', { method: 'POST', body: { actie, requestId }, pin });
 
       if (res.verrassing) {
@@ -182,14 +172,8 @@ function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; cod
         });
       }
       if (res.start) {
-        const w = res.start.winnaar;
-        const uitslag = !w
-          ? 'Er was niet gestemd, dus niemand sprong.'
-          : w.gesprongen
-            ? `"${w.titel}" won de ronde met ${w.stemmen} ${w.stemmen === 1 ? 'stem' : 'stemmen'} en sprong vooruit.`
-            : `"${w.titel}" won de ronde, maar gaat zelf zingen, dus geen sprong.`;
         setMelding({
-          tekst: `▶ "${res.start.gestart.titel}", ${res.start.gestart.zangerNaam}. ${uitslag} Ronde ${res.start.ronde} loopt.`,
+          tekst: `▶ "${res.start.gestart.titel}", ${res.start.gestart.zangerNaam} is aan de beurt.`,
           fout: false,
         });
       }
@@ -318,8 +302,7 @@ function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; cod
 
       {rijLengte > 0 && (
         <p className="mb-2 px-1 text-xs text-tekst/50">
-          Tik het nummer aan dat nu gaat zingen. Dat rekent meteen de stemronde af en start een
-          nieuwe.
+          Tik het nummer aan dat nu gaat zingen. Het vorige nummer is dan klaar.
         </p>
       )}
 
@@ -331,14 +314,6 @@ function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; cod
             positie={i + 1}
             eerstvolgende={i === 0}
             onKlik={() => setTeStarten(entry)}
-            acties={
-              <span className="flex w-12 shrink-0 flex-col items-center justify-center rounded-xl border border-white/10 py-1 text-tekst/70">
-                <span aria-hidden="true" className="text-sm leading-none">
-                  ▲
-                </span>
-                <span className="text-sm leading-tight font-bold tabular-nums">{entry.stemmen}</span>
-              </span>
-            }
             onderActies={
               <>
                 <button
@@ -384,7 +359,7 @@ function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; cod
               {zangersTekst(teStarten.zangerNaam, teStarten.extraSingers)}
             </p>
             <p className="mt-3 text-xs text-tekst/50">
-              De lopende stemronde wordt afgerekend en er begint een nieuwe.
+              Het nummer dat nu speelt, is dan klaar.
             </p>
 
             <button
@@ -408,46 +383,9 @@ function HostPaneel({ pin, code, onAndereShow, onUitloggen }: { pin: string; cod
         </div>
       )}
 
-      {data && data.gepauzeerd.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-2 px-1 kop text-base tracking-[0.16em] text-tekst/70 uppercase">
-            Gepauzeerd (check-in gemist)
-          </h2>
-          <ul className="flex flex-col gap-2">
-            {data.gepauzeerd.map((entry) => (
-              <li key={entry.id} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                <p className="truncate font-semibold text-tekst/70">{entry.titel}</p>
-                <p className="truncate text-sm text-tekst/40">
-                  {entry.artiest} · door {zangersTekst(entry.zangerNaam, entry.extraSingers)} ·{' '}
-                  {entry.stemmen} stemmen
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => hostActie('herstel', entry.id)}
-                    disabled={bezigId === entry.id + 'herstel'}
-                    className={`${knop} border-oranje/50 bg-oranje/15 text-tekst active:bg-oranje/30`}
-                  >
-                    Terug in de rij
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => hostActie('verwijder', entry.id)}
-                    disabled={bezigId === entry.id + 'verwijder'}
-                    className={`${knop} border-rose-400/40 text-rose-200 active:bg-rose-500/20`}
-                  >
-                    Verwijder
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       <p className="mt-10 text-center text-xs text-tekst/40">
-        Volgorde van binnenkomst · de rondewinnaar springt {SPRONG_KORTE_RIJ} plek vooruit
-        ({SPRONG_VOLLE_RIJ} vanaf {GROTE_RIJ_VANAF} nummers)
+        Volgorde van binnenkomst · skippen zet een nummer achteraan · de Speler van de Showcomposer
+        kan een nummer als volgende zetten
       </p>
     </main>
   );

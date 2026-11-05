@@ -8,7 +8,7 @@ const montserrat = Montserrat({ variable: '--font-montserrat', subsets: ['latin'
 
 export const metadata: Metadata = {
   title: 'Karaoke · Knal & Co.',
-  description: 'Vraag je nummer aan en stem op de wachtrij.',
+  description: 'Vraag je nummer aan en zie wanneer je aan de beurt bent.',
 };
 
 export const viewport: Viewport = {

@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SongSearch } from '@/components/SongSearch';
-import { CheckinModal } from '@/components/CheckinModal';
-import { QueueRow, StemKnop } from '@/components/QueueRow';
+import { QueueRow } from '@/components/QueueRow';
 import { useQueue } from '@/components/useQueue';
 import { useBijnaAanDeBeurt, useMeldingen, type MeldingStatus } from '@/components/aandacht';
 import { api, ApiFout, getDeviceId, getNaam, getShow, setNaam, setShow } from '@/lib/client';
@@ -11,14 +10,10 @@ import { CodeScherm } from '@/components/CodeScherm';
 import { Merk } from '@/components/Merk';
 import { JouwScore, Leaderboard, useScoreMelding } from '@/components/Scores';
 import {
-  BESCHERMING_NA_RONDES,
   DRUKKE_RIJ_VANAF,
-  GROTE_RIJ_VANAF,
   MAX_AANVRAGEN_PER_DEVICE,
   MAX_EXTRA_ZANGERS,
   MAX_ZANGER_LENGTE,
-  SPRONG_KORTE_RIJ,
-  SPRONG_VOLLE_RIJ,
   VERRASSING_MIN_RIJ,
 } from '@/lib/constants';
 import { zangersTekst } from '@/lib/zangers';
@@ -91,15 +86,13 @@ function Gasten({ onVerlopen }: { onVerlopen: (melding: string) => void }) {
     setNaamState(getNaam());
   }, []);
 
-  const { data, fout, foutCode, klokverschil, ververs } = useQueue(deviceId);
+  const { data, fout, foutCode, ververs } = useQueue(deviceId);
   useBijnaAanDeBeurt(data?.wachtrij ?? []);
   useScoreMelding(data?.mijnUitslagen ?? []);
   // Een show die niet (meer) bestaat: terug naar het invoeren van de code.
   useEffect(() => {
     if (foutCode === 'SHOW' || foutCode === 'CODE') onVerlopen(fout ?? 'Deze show-code bestaat niet (meer).');
   }, [foutCode, fout, onVerlopen]);
-  const nieuweRonde = useRondeWissel(data?.ronde ?? null);
-
   async function actie(fn: () => Promise<unknown>, id?: string) {
     setMelding(null);
     if (id) setBezigId(id);
@@ -121,10 +114,7 @@ function Gasten({ onVerlopen }: { onVerlopen: (melding: string) => void }) {
     // Toestemming pas vragen als iemand echt meedoet, en met uitleg vooraf:
     // een prompt uit het niets wordt vrijwel altijd weggeklikt.
     setToonMeldingUitleg(true);
-    setMelding(
-      `"${song.titel}" staat in de rij! 🎉 Je schuift vanzelf op in de rij. Extra snel? ` +
-        'Vraag je vrienden om deze ronde op jullie nummer te stemmen.'
-    );
+    setMelding(`"${song.titel}" staat in de rij! 🎉 Hou deze pagina open, dan zie je wanneer je aan de beurt bent.`);
     await ververs();
   }
 
@@ -141,7 +131,6 @@ function Gasten({ onVerlopen }: { onVerlopen: (melding: string) => void }) {
   // hem mee, zodat de knop en de melding niet uit de pas kunnen lopen.
   const maxAanvragen = data?.maxAanvragen ?? MAX_AANVRAGEN_PER_DEVICE;
   const vol = (data?.eigenAanvragen ?? 0) >= maxAanvragen;
-  const mijnGepauzeerd = data?.gepauzeerd.filter((e) => e.isMijn) ?? [];
 
   return (
     <main className="mx-auto w-full max-w-lg flex-1 px-4 pt-5 pb-16">
@@ -193,8 +182,7 @@ function Gasten({ onVerlopen }: { onVerlopen: (melding: string) => void }) {
       {toonMeldingUitleg && meldingStatus === 'default' && (
         <div className="mt-4 rounded-xl border border-oranje/30 bg-oranje/10 px-4 py-4">
           <p className="text-sm leading-relaxed">
-            Zet meldingen aan, dan waarschuwen we je als je bijna aan de beurt bent en voor de
-            ben-je-er-nog-check.
+            Zet meldingen aan, dan waarschuwen we je als je bijna aan de beurt bent.
           </p>
           <div className="mt-3 flex gap-2">
             <button
@@ -231,16 +219,10 @@ function Gasten({ onVerlopen }: { onVerlopen: (melding: string) => void }) {
         </h2>
 
         <p className="px-1 text-xs leading-relaxed text-tekst/70">
-          Wie het eerst komt, die het eerst zingt. De rondewinnaar springt vooruit.
+          Wie het eerst komt, die het eerst zingt. De spelleider bepaalt wie er aan de beurt is.
         </p>
 
         <Spelregels maxAanvragen={maxAanvragen} />
-
-        {nieuweRonde && (
-          <p className="mb-2 rounded-xl border border-oranje/40 bg-oranje/10 px-4 py-3 text-sm font-semibold text-tekst">
-            🔔 Nieuwe stemronde! Je hebt weer één stem.
-          </p>
-        )}
 
         {data && data.wachtrij.length === 0 ? (
           <p className="kaart px-4 py-6 text-center text-sm text-tekst/60">
@@ -274,131 +256,24 @@ function Gasten({ onVerlopen }: { onVerlopen: (melding: string) => void }) {
                     >
                       Intrekken
                     </button>
-                  ) : (
-                    <StemKnop
-                      entry={entry}
-                      bezig={bezigId === entry.id}
-                      onStem={() =>
-                        actie(
-                          () =>
-                            api('/api/vote', {
-                              method: 'POST',
-                              body: { requestId: entry.id, deviceId },
-                            }),
-                          entry.id
-                        )
-                      }
-                    />
-                  )
+                  ) : null
                 }
               />
             ))}
           </ul>
         )}
 
-        {data && data.wachtrij.length > 0 && (
-          <p className="mt-2 px-1 text-xs text-tekst/40">
-            Eén stem per ronde. Druk op een ander nummer om je stem te verplaatsen. Stemmen is
-            optioneel en anoniem.
-          </p>
-        )}
       </section>
 
       <Leaderboard lijst={data?.leaderboard ?? []} />
 
-      {mijnGepauzeerd.length > 0 && (
-        <section className="mt-7">
-          <h2 className="mb-2 px-1 kop text-base tracking-[0.16em] text-tekst/70 uppercase">
-            Gepauzeerd
-          </h2>
-          <ul className="flex flex-col gap-2">
-            {mijnGepauzeerd.map((entry) => (
-              <li key={entry.id} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                <p className="truncate font-semibold text-tekst/70">{entry.titel}</p>
-                <p className="truncate text-sm text-tekst/40">{entry.artiest}</p>
-                <p className="mt-1 text-xs text-tekst/50">
-                  Je hebt de check-in gemist. Nog één keer en je aanvraag vervalt.
-                </p>
-                <button
-                  type="button"
-                  onClick={() =>
-                    actie(
-                      () =>
-                        api('/api/checkin', {
-                          method: 'POST',
-                          body: { actie: 'hervat', requestId: entry.id, deviceId },
-                        }),
-                      entry.id
-                    )
-                  }
-                  disabled={bezigId === entry.id}
-                  className="mt-3 min-h-12 w-full rounded-xl knop-verloop font-bold text-white
-                             active:brightness-90 disabled:opacity-50"
-                >
-                  Ik ben er weer!
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       <p className="mt-8 text-center text-xs leading-relaxed text-tekst/40">
         Volgorde van binnenkomst · max {maxAanvragen}{' '}
         {maxAanvragen === 1 ? 'aanvraag' : 'aanvragen'} tegelijk
-        {maxAanvragen === 1 && ' (drukke rij)'} · één stem per stemronde, te verplaatsen zolang de
-        ronde loopt · hou deze pagina open
+        {maxAanvragen === 1 && ' (drukke rij)'} · hou deze pagina open
       </p>
-
-      {data?.checkin && (
-        <CheckinModal
-          checkin={data.checkin}
-          klokverschil={klokverschil}
-          onBevestig={() =>
-            actie(() =>
-              api('/api/checkin', {
-                method: 'POST',
-                body: { requestId: data.checkin!.requestId, deviceId },
-              })
-            )
-          }
-          onAfmelden={async () => {
-            const id = data.checkin!.requestId;
-            try {
-              await api('/api/request', { method: 'DELETE', body: { requestId: id, deviceId } });
-              setMelding('Je nummer is uit de lijst gehaald. Tot de volgende keer! 👋');
-            } catch (error) {
-              setMelding(error instanceof ApiFout ? error.message : 'Er ging iets mis.');
-            }
-            await ververs();
-          }}
-        />
-      )}
     </main>
   );
-}
-
-/**
- * Signaleert dat er een nieuwe stemronde begonnen is. Blijft acht seconden
- * staan; lang genoeg om te zien, kort genoeg om niet in de weg te zitten.
- */
-function useRondeWissel(ronde: number | null): boolean {
-  const vorige = useRef<number | null>(null);
-  const [zichtbaar, setZichtbaar] = useState(false);
-
-  useEffect(() => {
-    if (ronde === null) return;
-    if (vorige.current === null || vorige.current === ronde) {
-      vorige.current = ronde;
-      return;
-    }
-    vorige.current = ronde;
-    setZichtbaar(true);
-    const timer = setTimeout(() => setZichtbaar(false), 8000);
-    return () => clearTimeout(timer);
-  }, [ronde]);
-
-  return zichtbaar;
 }
 
 function MeldingStatusregel({
@@ -440,11 +315,8 @@ function Spelregels({ maxAanvragen }: { maxAanvragen: number }) {
         <span className="text-tekst/70">▸</span> Spelregels
       </summary>
       <p className="mt-3 text-sm leading-relaxed text-tekst/80">
-        De rij is op volgorde van aanvragen. Tijdens elk nummer mag je één stem uitbrengen op je
-        favoriet; de winnaar van de ronde springt {SPRONG_KORTE_RIJ} plekje vooruit (
-        {SPRONG_VOLLE_RIJ} bij een volle rij, {GROTE_RIJ_VANAF}+). Daarna beginnen de stemmen
-        opnieuw. Een nummer dat {BESCHERMING_NA_RONDES} rondes stilstaat kan niet nog eens worden
-        ingehaald. Stemmen is optioneel en anoniem. En onthoud: het is geen wedstrijd, het
+        De rij is op volgorde van aanvragen: wie het eerst komt, die het eerst zingt. De spelleider
+        roept je naar voren als je aan de beurt bent. En onthoud: het is geen wedstrijd, het
         belangrijkste is dat we er samen een gezellige avond van maken. 🎤
       </p>
       <ul className="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-tekst/70">
@@ -454,17 +326,20 @@ function Spelregels({ maxAanvragen }: { maxAanvragen: number }) {
           verschillende mensen aan de beurt komen.{' '}
           {maxAanvragen === 1 && (
             <strong className="text-roze">Op dit moment geldt die krappere limiet.</strong>
-          )}{' '}
-          Op je eigen aanvraag stemmen kan niet.
+          )}
         </li>
         <li>
           Zing je samen met iemand? Voeg bij het aanvragen een extra zanger toe, maximaal{' '}
           {MAX_EXTRA_ZANGERS + 1} per nummer.
         </li>
         <li>
-          Hou deze pagina open en zet meldingen aan. Sta je lang in de rij, dan vragen we elk
-          kwartier of je er nog bent. Twee keer niet reageren, of &quot;nee&quot; antwoorden,
-          betekent dat je nummer vervalt.
+          Je aanvraag blijft staan tot je gezongen hebt. Toch niet meer? Trek hem in, dan is de
+          plek voor iemand anders. Hou deze pagina open en zet meldingen aan, dan hoor je het als
+          je bijna aan de beurt bent.
+        </li>
+        <li>
+          Na je optreden zie je hier de score van de Knal-meter, met wat erbij of eraf ging, en
+          het leaderboard van de avond.
         </li>
         <li>
           Bij een hele volle lijst ({VERRASSING_MIN_RIJ}+ nummers) kan de spelleider af en toe een

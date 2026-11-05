@@ -1,14 +1,14 @@
 # Karaoke Queue
 
 Wachtrij-app voor een karaokefeestje. Gasten scannen een QR-code, zoeken een nummer in de
-échte KaraFun-catalogus, vragen het aan en stemmen op elkaars nummers. De host heeft een
-eigen pagina met pincode om de rij af te werken.
+échte KaraFun-catalogus en vragen het aan. De host heeft een eigen pagina met pincode om de
+rij af te werken; meestal doet de Speler van de Knal Showcomposer dat.
 
-- **Gastenpagina** `/` — naam invullen, nummer zoeken, aanvragen (alleen of als duet),
-  stemmen, eigen aanvraag intrekken
-- **Hostpagina** `/host` — tik het nummer aan dat gaat zingen (dat rekent de stemronde af),
-  skippen, verwijderen, gepauzeerde aanvragen herstellen, verrassingskeuze trekken
-- **QR-pagina** `/qr?s=CODE` — QR-code naar de gastenpagina van een show, met downloadknop
+- **Gastenpagina** `/`: naam invullen, nummer zoeken, aanvragen (alleen of als duet), je plek
+  in de rij, je score met opbouw als je gezongen hebt, het leaderboard, eigen aanvraag intrekken
+- **Hostpagina** `/host`: tik het nummer aan dat gaat zingen, skippen, verwijderen,
+  verrassingskeuze trekken
+- **QR-pagina** `/qr?s=CODE`: QR-code naar de gastenpagina van een show, met downloadknop
 
 **Shows (sinds de karaoke-module van de Knal Showcomposer):** elke avond heeft een eigen
 show-code van 5 tekens, zodat twee hosts op één avond elk een eigen wachtrij hebben. De host
@@ -16,8 +16,10 @@ maakt een show op `/host` (na de pincode), of de Showcomposer maakt hem. Gasten 
 `/?s=CODE` (de QR-code) of typen de code in. Een show verloopt na 48 uur. Host-acties mogen met
 de pincode of met het Speler-token van de show (`Authorization: Bearer …`), zodat de pincode
 nooit in een speelpakket hoeft. De Knal-meter van de Showcomposer schrijft per optreden een
-score terug (`actie: uitslag`); de zanger ziet die op zijn telefoon, iedereen ziet het
-leaderboard. Opmaak in de Knal-huisstijl: Bebas Neue en Montserrat (via `next/font`, in de
+score terug (`actie: uitslag`, sinds fase 13.8 met de opbouw: meter, klassieker, herhaling en
+de bonus van de jury); de zanger ziet die op zijn telefoon, iedereen ziet het leaderboard.
+Sinds fase 13.8 (na de eerste echte avond) zijn de stemronde en de check-in eruit: de rij is
+puur de volgorde van binnenkomst plus wat de host doet. Opmaak in de Knal-huisstijl: Bebas Neue en Montserrat (via `next/font`, in de
 site zelf), het roze-oranje verloop en één collage-accent, de gouden microfoon uit de decorset
 (`public/microfoon.webp`).
 
@@ -79,10 +81,10 @@ npm run test:api
 ```
 
 Start een fake-Upstash plus een dev-server, speelt een compleet feestscenario af (aanvragen,
-dubbele nummers, duetten, de stemronde met sprongen, tie-breaks en de beschermregel,
-host-acties, de aanvraaglimiet die bij een drukke rij naar één zakt, een check-in die verloopt
-door de klok terug te zetten, en een verrassingskeuze uit
-een rij van 30+) en ruimt daarna alles op. 108 checks, geen Upstash-account nodig.
+dubbele nummers, duetten, host-acties, de aanvraaglimiet die bij een drukke rij naar één zakt,
+een verrassingskeuze uit een rij van 30+, shows en het Speler-token, scores met opbouw en de
+bonus van de jury, scores aan en uit, nummer toevoegen door de host, /go) en ruimt daarna
+alles op. Geen Upstash-account nodig.
 
 Tegen een al draaiende server met echte Redis:
 
@@ -112,7 +114,7 @@ Ontbreken ze, dan geeft de app een duidelijke melding in plaats van een cryptisc
 5. **Deploy** — gebruik de **productie-URL** (`https://<project>.vercel.app`), niet de
    deployment-URL met een hash erin: die laatste zit achter Vercel-login en verandert bij
    elke deploy.
-6. **Testen** — open de URL op twee telefoons, vraag een nummer aan, stem, en check `/host`.
+6. **Testen** — open de URL op twee telefoons, vraag een nummer aan en check `/host`.
 7. **QR-code** — ga naar `/qr` en download de PNG, of maak er een op
    https://www.qrcode-monkey.com.
 
@@ -122,94 +124,80 @@ Ontbreken ze, dan geeft de app een duidelijke melding in plaats van een cryptisc
 
 ## Spelregels
 
-**Volgorde** — de wachtrij staat puur op volgorde van binnenkomst (`arrivalSeq`). Voordringen
-gebeurt alleen door de stemronde te winnen, en de host kan een nummer naar achteren skippen of
-als verrassing naar voren halen.
+**Volgorde**: de wachtrij staat puur op volgorde van binnenkomst (`arrivalSeq`). Alleen de host
+verandert daar iets aan: skippen zet een nummer achteraan, de Speler van de Showcomposer kan een
+nummer als volgende zetten (`actie: toevoegen` met `volgende: true`), en bij een hele volle rij
+kan de host een verrassingskeuze trekken.
 
-**Stemronde** — tijdens elk nummer loopt er één ronde. Elke telefoon heeft die ronde precies
-één stem, uit te brengen op één aanvraag in de wachtrij; op je eigen aanvraag stemmen kan niet.
-Opnieuw stemmen verplaatst je stem in plaats van er een toe te voegen. Stemmen is optioneel en
-anoniem: wie op wat gestemd heeft blijft server-side, naar buiten gaan alleen aantallen.
+**Geen stemronde, geen check-in** (sinds fase 13.8): op de eerste echte avond werkten ze niet
+goed en de showmaster beheert de volgorde toch zelf. Een aanvraag blijft staan tot hij gezongen
+is, de gast hem intrekt of de host hem weghaalt. De meldingen "bijna jouw beurt" (#2) en "jij
+bent aan de beurt" (#1) blijven.
 
-Bij het afrekenen springt het nummer met de meeste stemmen vooruit: één plek bij een rij tot en
-met 6 nummers, twee plekken vanaf 7. Bij een gelijke stand wint wie het langst in de rij staat.
-Is er niet gestemd, dan springt er niemand. Daarna worden alle stemmen gewist en begint een
-nieuwe ronde; de winnaar houdt een 🏆-badge tot de ronde erna.
+**De host tikt aan wie zingt**: er is geen aparte "volgende"-knop. De hele wachtrij is
+aanklikbaar; de host tikt het nummer aan dat nu gezongen gaat worden (meestal #1, maar het mag
+elk nummer zijn) en bevestigt één keer. Dat haalt het nummer uit de rij als "nu aan de beurt"
+en zet het vorige op klaar. Het geheel draait onder een kortdurend slot, zodat twee klikken
+elkaar niet kruisen. `actie: klaar` zet het spelende nummer op klaar zonder een volgende te
+starten (de Speler, als het nummer afloopt).
 
-**Beschermregel** — per aanvraag wordt bijgehouden hoeveel rondes op rij hij niet is opgeschoven
-(positie gelijk of slechter dan de vorige ronde). Vanaf 2 zulke rondes is de aanvraag beschermd:
-de rondewinnaar kan er niet meer overheen springen en landt er direct onder. Zodra de aanvraag
-weer opschuift, valt de bescherming weg.
+**Duetten**: bij het aanvragen kun je één extra zanger toevoegen (samen dus 2). Die naam is
+puur weergave: alleen de aanvrager hangt aan het apparaat en kan intrekken. In de lijst staat
+er dan "Kenneth + Lisa".
 
-**De host hoeft niets te beheren** — er is geen aparte "volgende"- of afreken-knop. De hele
-wachtrij is aanklikbaar; de host tikt het nummer aan dat nu gezongen gaat worden (meestal #1,
-maar het mag elk nummer zijn) en bevestigt één keer. Die ene klik rekent de lopende ronde af,
-laat de winnaar springen, haalt het aangeklikte nummer uit de rij als "nu aan de beurt", en
-wist de stemmen voor de nieuwe ronde. Is het aangeklikte nummer zelf de rondewinnaar, dan
-vervalt de sprong. Het geheel draait onder een kortdurend slot, zodat er nooit een halve ronde
-kan ontstaan.
-
-**Duetten** — bij het aanvragen kun je één extra zanger toevoegen (samen dus 2). Die naam is
-puur weergave: alleen de aanvrager hangt aan het apparaat en kan intrekken of de check-in
-bevestigen. In de lijst staat er dan "Kenneth + Lisa".
-
-**Limieten** — maximaal 2 openstaande aanvragen per telefoon, maar zodra er meer dan 10
+**Limieten**: maximaal 2 openstaande aanvragen per telefoon, maar zodra er meer dan 10
 nummers in de rij staan wordt dat er één, zodat er meer verschillende mensen aan de beurt
 komen. Wie er op dat moment al twee had houdt ze gewoon; de limiet blokkeert alleen nieuwe
 aanvragen. Zakt de rij weer onder de drempel, dan mag er weer een tweede bij. De server
 berekent de geldende limiet en geeft hem mee in `GET /api/queue` (`maxAanvragen`), zodat de
-knoptekst en de melding niet uit de pas kunnen lopen met wat de API accepteert.
+knoptekst en de melding niet uit de pas kunnen lopen met wat de API accepteert. De host heeft
+geen limiet.
 
-Hetzelfde nummer kan maar één keer tegelijk in de rij staan; wie het nogmaals aanvraagt krijgt
-"staat al in de lijst — stem erop!".
+Hetzelfde nummer kan maar één keer tegelijk in de rij staan (of gezongen worden); wie het
+nogmaals aanvraagt krijgt "staat al in de rij". Na het zingen mag het opnieuw, de Knal-meter
+rekent dan een aftrek voor de herhaling.
 
-**Check-in ("ben je er nog?")** — als je aanvraag langer dan 15 minuten in de rij staat én
-niet op #1 of #2 staat, verschijnt elk kwartier een modal op je eigen pagina, met trilsignaal,
-browsermelding en een knipperende tab-titel. Bevestig je niet binnen 5 minuten, dan wordt je
-nummer gepauzeerd: het verdwijnt uit de actieve rij en komt in een grijs blokje met
-"Ik ben er weer!" (de aanvraag komt achteraan terug). Mis je het een tweede keer, dan vervalt de
-aanvraag definitief. Naast de JA-knop zit "Nee, haal ons maar uit de lijst": daarmee verdwijnt
-de aanvraag meteen. De host ziet gepauzeerde aanvragen ook en kan ze terugzetten.
+**Score met opbouw**: de Speler stuurt per optreden `score`, `labels` en `opbouw`
+(`{meter, klassieker, herhaling, bonus}`); nogmaals sturen vervangt de vorige, bijvoorbeeld als
+de showmaster achteraf een bonus geeft. De zanger ziet de eindscore met de opbouw eronder, het
+leaderboard ook. Met `actie: scores` kan de host de scores uitzetten (geen leaderboard en geen
+eigen score op de telefoons) en `actie: uitslagweg` haalt één score weg.
 
-Dit alles wordt server-side berekend bij elke queue-read, dus er is geen cron of achtergrondtaak
-nodig.
-
-**Meldingen** — na de eerste geslaagde aanvraag legt de app uit waarvoor meldingen dienen en
+**Meldingen**: na de eerste geslaagde aanvraag legt de app uit waarvoor meldingen dienen en
 vraagt pas daarna toestemming; een prompt uit het niets wordt vrijwel altijd weggeklikt. Een
 statusregel op de gastenpagina laat zien of ze aan of uit staan. Staan ze aan, dan krijg je
-een melding als je nummer op #2 komt, als je aan de beurt bent, en bij elke check-in.
+een melding als je nummer op #2 komt en als je aan de beurt bent, en een trilsignaal bij een
+nieuwe score.
 
-**Verrassingskeuze** — vanaf 30 nummers in de rij kan de host op "🎲 Verrassing" drukken.
-Die trekt willekeurig een aanvraag van buiten de top 5 (daar is echt op gestemd) en zet hem
-vooraan in de rij, zonder de lopende ronde of één stem aan te raken. Zolang het nummer bovenaan
-staat ziet iedereen "🎲 verrassingskeuze". Skipt de host het alsnog, dan vervalt de markering.
+**Verrassingskeuze**: vanaf 30 nummers in de rij kan de host op "🎲 Verrassing" drukken.
+Die trekt willekeurig een aanvraag van buiten de top 5 (die zijn bijna aan de beurt) en zet hem
+vooraan in de rij. Zolang het nummer bovenaan staat ziet iedereen "🎲 verrassingskeuze". Skipt
+de host het alsnog, dan vervalt de markering.
 
 ## Datamodel (Redis)
 
 Alle sleutels van een show staan onder `s:{code}:` (in de tabel zonder dat voorvoegsel, behalve
-`show:{code}`).
+`show:{code}` en `actieve-shows`).
 
 | Sleutel | Type | Inhoud |
 | --- | --- | --- |
-| `show:{code}` | hash | `naam`, `aangemaakt`, `spelerToken` (48 uur) |
+| `show:{code}` | hash | `naam`, `aangemaakt`, `spelerToken`, `scoresUit` (48 uur) |
+| `actieve-shows` | set | codes van de shows achter `/go` |
 | `s:{code}:snapshot` | string | de momentopname van de hele rij als JSON |
 | `s:{code}:gescoord` | set | aanvragen met een score van de Knal-meter (leaderboard) |
-| `req:{id}` | hash | `songId`, `titel`, `artiest`, `zangerNaam`, `extraSingers`, `deviceId`, `createdAt`, `arrivalSeq`, `status`, `lastConfirmedAt`, `missedCheckins`, `stilstandRondes`, `vorigePositie`, `verrassingOp`, en na het zingen `score`, `labels`, `gescoordOp` |
-| `live` | set | ids van aanvragen die nog leven (`queued`, `playing` of `paused`) |
-| `ronde:stemmen` | hash | `deviceId` → `requestId` van de lopende ronde; één veld per telefoon |
-| `ronde:nummer` | string | aantal afgerekende rondes (de lopende ronde is er eentje verder) |
-| `ronde:winnaar` | string | winnaar van de vorige ronde, voor de 🏆-badge |
+| `req:{id}` | hash | `songId`, `titel`, `artiest`, `zangerNaam`, `extraSingers`, `deviceId`, `createdAt`, `arrivalSeq`, `status`, `verrassingOp`, `viaHost`, en na het zingen `score`, `labels`, `opbouw`, `gescoordOp` |
+| `live` | set | ids van aanvragen die nog leven (`queued` of `playing`) |
 | `device:{deviceId}:requests` | set | openstaande aanvragen van dit apparaat |
 | `request:counter` | string | oplopende teller voor nieuwe ids |
 | `seq:counter` | string | oplopende teller voor `arrivalSeq` |
 | `slot:start` | string | kortdurend slot (NX + PX) rond een host-klik |
 
-`status` is `queued`, `playing`, `paused`, `done` of `removed`. Het nummer dat gezongen wordt
-staat op `playing` en zit niet in de wachtrij. Afgeronde en verwijderde aanvragen houden nog
-24 uur een TTL en verdwijnen daarna vanzelf.
-
-Dat één hash de hele ronde bevat is bewust: het stemtotaal kost zo één Redis-commando in plaats
-van één per aanvraag, en "opnieuw stemmen" is simpelweg hetzelfde veld overschrijven.
+`status` is `queued`, `playing`, `done` of `removed`. Het nummer dat gezongen wordt staat op
+`playing` en zit niet in de wachtrij. Afgeronde en verwijderde aanvragen houden nog 24 uur een
+TTL en verdwijnen daarna vanzelf; een aanvraag met een score blijft twee dagen (het
+leaderboard). Een aanvraag die vóór fase 13.8 op `paused` stond, telt weer als `queued`; de
+oude velden en sleutels van de stemronde en de check-in (`ronde:*`, `lastConfirmedAt`,
+`missedCheckins`, `stilstandRondes`, `vorigePositie`) worden niet meer gelezen of geschreven.
 
 `extraSingers` is een JSON-lijst met maximaal 1 naam (zie `MAX_EXTRA_ZANGERS`) en
 `verrassingOp` een epoch-ms of 0.
@@ -217,8 +205,7 @@ Aanvragen die zonder die velden zijn weggeschreven blijven werken: ze worden gel
 lege lijst en 0.
 
 `GET /api/queue?deviceId=…` geeft in één response de gesorteerde rij, wie er nu aan de beurt is,
-de gepauzeerde aanvragen, het rondenummer, waar dít apparaat op gestemd heeft en de
-check-in-status. Nooit staat erin wie er verder op wat gestemd heeft.
+het aantal eigen aanvragen en de geldende limiet, het leaderboard en de eigen scores.
 
 ### Let op: het verbruik van de gratis Upstash-tier
 
@@ -244,7 +231,7 @@ Voor een beeldgenerator (of een ontwerper):
 > Ontwerp een staande A3-poster voor een karaokefeest. Donkerpaars-naar-zwarte achtergrond met
 > neonroze en cyaan accenten, in de sfeer van een jaren-80 synthwave-club. Bovenaan groot en
 > vet de tekst "ZING MEE" in een strak schreefloos lettertype. Daaronder kleiner:
-> "Scan de code, kies je nummer, stem op de rest." In het midden een groot wit vierkant vlak
+> "Scan de code, kies je nummer en kom zingen." In het midden een groot wit vierkant vlak
 > met veel ruimte eromheen waar de QR-code in geplakt kan worden — laat dat vlak leeg. Onderaan
 > een subtiele microfoon-illustratie met neonrand. Veel negatieve ruimte, hoog contrast,
 > leesbaar vanaf drie meter afstand.

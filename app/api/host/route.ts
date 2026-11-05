@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import {
-  hostHerstel,
   hostKlaar,
   hostScores,
   hostSkip,
@@ -40,15 +39,14 @@ export async function POST(request: Request) {
         await verleng(code);
         break;
       case 'start':
-        // Eén klik: ronde afrekenen, winnaar laten springen, dit nummer aan de
-        // beurt zetten en de stemmen wissen.
+        // Eén klik: dit nummer aan de beurt, het vorige is klaar.
         return NextResponse.json({ ok: true, start: await hostStart(code, requestId) });
       case 'klaar':
         // Fase 13: het nummer is afgelopen zonder dat er een volgende start.
         return NextResponse.json({ ok: true, klaar: await hostKlaar(code) });
       case 'uitslag':
         // Fase 13: de score van de Knal-meter, zodat de zanger hem op zijn telefoon ziet.
-        return NextResponse.json({ ok: true, uitslag: await uitslagBewaren(code, { requestId, score: body.score, labels: body.labels }) });
+        return NextResponse.json({ ok: true, uitslag: await uitslagBewaren(code, { requestId, score: body.score, labels: body.labels, opbouw: body.opbouw }) });
       case 'toevoegen':
         // De Speler meldt iemand aan ("Nummer toevoegen"), met de markering "via host".
         return NextResponse.json({
@@ -71,9 +69,6 @@ export async function POST(request: Request) {
         break;
       case 'verwijder':
         await hostVerwijder(code, requestId);
-        break;
-      case 'herstel':
-        await hostHerstel(code, requestId);
         break;
       case 'verrassing':
         return NextResponse.json({ ok: true, verrassing: await hostVerrassing(code) });

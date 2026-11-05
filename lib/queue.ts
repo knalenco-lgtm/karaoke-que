@@ -1,19 +1,11 @@
 import { getRedis, keys, SHOW_KEYS, type Keys } from './redis';
 import { getSongById } from './catalog';
-import type { CheckinPrompt, KaraokeRequest, QueueEntry, QueueResponse, RequestStatus, ShowInfo, Uitslag } from './types';
+import type { KaraokeRequest, QueueEntry, QueueResponse, RequestStatus, ScoreOpbouw, ShowInfo, Uitslag } from './types';
 import {
-  BESCHERMING_NA_RONDES,
-  CHECKIN_INTERVAL_MS,
-  CHECKIN_RESPIJT_MS,
-  CHECKIN_VRIJE_POSITIES,
-  GROTE_RIJ_VANAF,
   maxAanvragenBij,
   MAX_EXTRA_ZANGER_LENGTE,
   MAX_EXTRA_ZANGERS,
-  MAX_GEMISTE_CHECKINS,
   MAX_ZANGER_LENGTE,
-  SPRONG_KORTE_RIJ,
-  SPRONG_VOLLE_RIJ,
   VERRASSING_BESCHERMDE_TOP,
   VERRASSING_MIN_RIJ,
 } from './constants';
@@ -66,8 +58,9 @@ function parseExtraSingers(ruw: unknown): string[] {
 
 function parseRequest(id: string, raw: Record<string, unknown> | null): KaraokeRequest | null {
   if (!raw || Object.keys(raw).length === 0) return null;
-  const status = String(raw.status ?? '') as RequestStatus;
-  if (!['queued', 'playing', 'paused', 'done', 'removed'].includes(status)) return null;
+  // Een aanvraag die vóór fase 13.8 gepauzeerd was (check-in gemist), komt gewoon terug in de rij.
+  const status = (raw.status === 'paused' ? 'queued' : String(raw.status ?? '')) as RequestStatus;
+  if (!['queued', 'playing', 'done', 'removed'].includes(status)) return null;
 
   return {
     id,
@@ -80,10 +73,6 @@ function parseRequest(id: string, raw: Record<string, unknown> | null): KaraokeR
     createdAt: Number(raw.createdAt ?? 0),
     arrivalSeq: Number(raw.arrivalSeq ?? raw.createdAt ?? 0),
     status,
-    lastConfirmedAt: Number(raw.lastConfirmedAt ?? raw.createdAt ?? 0),
-    missedCheckins: Number(raw.missedCheckins ?? 0),
-    stilstandRondes: Number(raw.stilstandRondes ?? 0),
-    vorigePositie: Number(raw.vorigePositie ?? 0),
     verrassingOp: Number(raw.verrassingOp ?? 0),
     viaHost: raw.viaHost === 1 || raw.viaHost === '1' || raw.viaHost === true,
   };
@@ -92,10 +81,6 @@ function parseRequest(id: string, raw: Record<string, unknown> | null): KaraokeR
 /** De wachtrij is puur op volgorde van binnenkomst. */
 function opVolgorde(a: KaraokeRequest, b: KaraokeRequest): number {
   return a.arrivalSeq - b.arrivalSeq;
-}
-
-function isBeschermd(request: KaraokeRequest): boolean {
-  return request.stilstandRondes >= BESCHERMING_NA_RONDES;
 }
 
 /** Een uitslag zoals hij in Redis staat (op de hash van de aanvraag). */
@@ -110,23 +95,32 @@ interface Gescoord {
   score: number;
   labels: string[];
   tijd: number;
+  opbouw: ScoreOpbouw | null;
+}
+
+/** De opbouw van een score zoals de Speler hem meestuurt; null als hij ontbreekt of niet klopt. */
+function parseOpbouw(ruw: unknown): ScoreOpbouw | null {
+  let w = ruw;
+  if (typeof w === 'string') {
+    try {
+      w = JSON.parse(w);
+    } catch {
+      return null;
+    }
+  }
+  if (!w || typeof w !== 'object') return null;
+  const o = w as Record<string, unknown>;
+  const getal = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.round(x) : 0);
+  if (typeof o.meter !== 'number') return null;
+  return { meter: getal(o.meter), klassieker: getal(o.klassieker), herhaling: getal(o.herhaling), bonus: getal(o.bonus) };
 }
 
 interface Toestand {
   show: ShowInfo;
-  /** Alle levende aanvragen: queued, playing en paused. */
+  /** Alle levende aanvragen: queued en playing. */
   requests: KaraokeRequest[];
-  /** Stemmen van de lopende ronde: deviceId -> requestId. Blijft server-side. */
-  stemmen: Map<string, string>;
-  ronde: number;
-  winnaarVorigeRonde: string | null;
   /** De optredens met een score van de Knal-meter, hoogste eerst. */
   uitslagen: Gescoord[];
-}
-
-/** Hoe de toestand als JSON in Redis staat (een Map kan niet in JSON). */
-interface ToestandJson extends Omit<Toestand, 'stemmen'> {
-  stemmen: Record<string, string>;
 }
 
 function parseLijst(ruw: unknown): string[] {
@@ -154,6 +148,7 @@ function parseGescoord(id: string, raw: Record<string, unknown> | null): Gescoor
     score: Number(raw.score),
     labels: parseLijst(raw.labels),
     tijd: Number(raw.gescoordOp ?? 0),
+    opbouw: parseOpbouw(raw.opbouw),
   };
 }
 
@@ -173,9 +168,6 @@ async function leesToestand(code: string): Promise<Toestand> {
 
   const pipe = redis.pipeline();
   pipe.hgetall(SHOW_KEYS.show(code));
-  pipe.hgetall(K.rondeStemmen);
-  pipe.get(K.rondeNummer);
-  pipe.get(K.rondeWinnaar);
   for (const id of ids) pipe.hgetall(K.request(id));
   for (const id of gescoordIds) pipe.hgetall(K.request(id));
   const results = await pipe.exec();
@@ -186,22 +178,13 @@ async function leesToestand(code: string): Promise<Toestand> {
   }
   const show: ShowInfo = { code, naam: String(showRuw.naam ?? ''), scoresAan: Number(showRuw.scoresUit ?? 0) !== 1 };
 
-  const ruweStemmen = (results[1] as Record<string, unknown> | null) ?? {};
-  const stemmen = new Map<string, string>(
-    Object.entries(ruweStemmen).map(([deviceId, requestId]) => [deviceId, String(requestId)])
-  );
-  // De sleutel telt afgerekende rondes; de lopende ronde is er eentje verder.
-  const ronde = Number(results[2] ?? 0) + 1;
-  const winnaarRuw = results[3];
-  const winnaarVorigeRonde = winnaarRuw === null || winnaarRuw === undefined ? null : String(winnaarRuw);
-
   const requests: KaraokeRequest[] = [];
   const wezen: string[] = [];
-  const VAST = 4;
+  const VAST = 1;
 
   ids.forEach((id, i) => {
     const request = parseRequest(id, results[i + VAST] as Record<string, unknown> | null);
-    if (!request || !['queued', 'playing', 'paused'].includes(request.status)) {
+    if (!request || !['queued', 'playing'].includes(request.status)) {
       wezen.push(id);
       return;
     }
@@ -220,7 +203,7 @@ async function leesToestand(code: string): Promise<Toestand> {
   if (wezen.length > 0) await redis.srem(K.live, ...wezen);
   if (wezenScore.length > 0) await redis.srem(K.gescoord, ...wezenScore);
 
-  return { show, requests, stemmen, ronde, winnaarVorigeRonde, uitslagen };
+  return { show, requests, uitslagen };
 }
 
 function naarUitslag(g: Gescoord, deviceId: string | null): Uitslag {
@@ -234,28 +217,13 @@ function naarUitslag(g: Gescoord, deviceId: string | null): Uitslag {
     score: g.score,
     labels: g.labels,
     tijd: g.tijd,
+    opbouw: g.opbouw ?? null,
     isMijn: deviceId !== null && g.deviceId === deviceId,
   };
 }
 
-/** Telt de stemmen van deze ronde per aanvraag. */
-function telStemmen(stemmen: Map<string, string>): Map<string, number> {
-  const telling = new Map<string, number>();
-  for (const requestId of stemmen.values()) {
-    telling.set(requestId, (telling.get(requestId) ?? 0) + 1);
-  }
-  return telling;
-}
-
-function naarEntry(
-  request: KaraokeRequest,
-  toestand: Toestand,
-  telling: Map<string, number>,
-  deviceId: string | null
-): QueueEntry {
+function naarEntry(request: KaraokeRequest, deviceId: string | null): QueueEntry {
   const isMijn = deviceId !== null && request.deviceId === deviceId;
-  const heeftMijnStem = deviceId !== null && toestand.stemmen.get(deviceId) === request.id;
-
   return {
     id: request.id,
     songId: request.songId,
@@ -266,112 +234,18 @@ function naarEntry(
     createdAt: request.createdAt,
     arrivalSeq: request.arrivalSeq,
     status: request.status,
-    stemmen: telling.get(request.id) ?? 0,
-    missedCheckins: request.missedCheckins,
-    isBeschermd: isBeschermd(request),
-    isWinnaarVorigeRonde: toestand.winnaarVorigeRonde === request.id,
     verrassingOp: request.verrassingOp,
     viaHost: request.viaHost,
     isMijn,
-    heeftMijnStem,
-    // Op je huidige keuze nog eens drukken doet niets; verplaatsen doe je door
-    // op een ánder nummer te stemmen.
-    magStemmen: deviceId !== null && !isMijn && request.status === 'queued' && !heeftMijnStem,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Check-in-sweep (draait bij elke queue-read, dus geen cron nodig)
-// ---------------------------------------------------------------------------
-
-/**
- * Werkt de check-in-status bij: wie te lang niet bevestigd heeft wordt
- * gepauzeerd, en bij de tweede keer definitief verwijderd.
- */
-async function checkinSweep(
-  code: string,
-  toestand: Toestand,
-  nu: number
-): Promise<{ toestand: Toestand; openstaandeCheckins: Map<string, number>; geschreven: boolean }> {
-  const redis = getRedis();
-  const K = keys(code);
-  const openstaandeCheckins = new Map<string, number>();
-
-  const gesorteerd = toestand.requests.filter((r) => r.status === 'queued').sort(opVolgorde);
-
-  const bewerkingen: Promise<unknown>[] = [];
-  let gewijzigd = false;
-
-  gesorteerd.forEach((req, index) => {
-    const positie = index + 1;
-
-    // Bovenaan de lijst of nog geen kwartier in de rij: geen check-in.
-    if (positie <= CHECKIN_VRIJE_POSITIES || nu - req.createdAt < CHECKIN_INTERVAL_MS) {
-      // Klok bijhouden zolang je vrijgesteld bent, anders verval je meteen
-      // zodra je weer naar beneden zakt. Alleen schrijven als het echt scheelt.
-      if (nu - req.lastConfirmedAt > CHECKIN_INTERVAL_MS / 2) {
-        req.lastConfirmedAt = nu;
-        bewerkingen.push(redis.hset(K.request(req.id), { lastConfirmedAt: nu }));
-      }
-      return;
-    }
-
-    if (nu - req.lastConfirmedAt < CHECKIN_INTERVAL_MS) return;
-
-    const vervaltOp = req.lastConfirmedAt + CHECKIN_INTERVAL_MS + CHECKIN_RESPIJT_MS;
-    if (nu < vervaltOp) {
-      openstaandeCheckins.set(req.id, vervaltOp);
-      return;
-    }
-
-    // Respijttijd voorbij zonder bevestiging.
-    gewijzigd = true;
-    const gemist = req.missedCheckins + 1;
-    req.missedCheckins = gemist;
-
-    if (gemist >= MAX_GEMISTE_CHECKINS) {
-      req.status = 'removed';
-      bewerkingen.push(archiveer(code, req.id, req.deviceId, 'removed', gemist, false));
-    } else {
-      req.status = 'paused';
-      req.lastConfirmedAt = nu;
-      bewerkingen.push(
-        redis.hset(K.request(req.id), {
-          status: 'paused',
-          missedCheckins: gemist,
-          lastConfirmedAt: nu,
-        })
-      );
-    }
-  });
-
-  await Promise.all(bewerkingen);
-
-  return {
-    toestand: gewijzigd
-      ? { ...toestand, requests: toestand.requests.filter((r) => r.status !== 'removed') }
-      : toestand,
-    openstaandeCheckins,
-    geschreven: bewerkingen.length > 0,
   };
 }
 
 /** Haalt een aanvraag uit de actieve structuren en zet hem op de archief-TTL. */
-async function archiveer(
-  code: string,
-  requestId: string,
-  deviceId: string,
-  status: 'done' | 'removed',
-  missedCheckins?: number,
-  snapshotWeg = true
-): Promise<void> {
+async function archiveer(code: string, requestId: string, deviceId: string, status: 'done' | 'removed', snapshotWeg = true): Promise<void> {
   const redis = getRedis();
   const K = keys(code);
   await Promise.all([
-    redis.hset(K.request(requestId), {
-      status,
-      ...(missedCheckins !== undefined ? { missedCheckins } : {}),
-    }),
+    redis.hset(K.request(requestId), { status }),
     redis.srem(K.live, requestId),
     redis.srem(K.deviceRequests(deviceId), requestId),
     redis.expire(K.request(requestId), ARCHIEF_TTL_SEC),
@@ -392,7 +266,7 @@ async function archiveer(
  */
 const SNAPSHOT_TTL_MS = 3000;
 
-const snapshots = new Map<string, { tijd: number; toestand: Toestand; checkins: Map<string, number> }>();
+const snapshots = new Map<string, { tijd: number; toestand: Toestand }>();
 
 /**
  * Na elke wijziging: de momentopname in het geheugen én in Redis weg, zodat de volgende lezer
@@ -405,8 +279,7 @@ async function vergeetSnapshot(code: string): Promise<void> {
 }
 
 function naarJson(t: Toestand): string {
-  const j: ToestandJson = { ...t, stemmen: Object.fromEntries(t.stemmen) };
-  return JSON.stringify(j);
+  return JSON.stringify(t);
 }
 
 function uitJson(ruw: unknown): Toestand | null {
@@ -419,8 +292,9 @@ function uitJson(ruw: unknown): Toestand | null {
     }
   }
   if (!j || typeof j !== 'object' || !('requests' in j)) return null;
-  const t = j as ToestandJson;
-  return { ...t, stemmen: new Map(Object.entries(t.stemmen ?? {})), uitslagen: t.uitslagen ?? [] };
+  const t = j as Toestand & { stemmen?: unknown; ronde?: unknown; winnaarVorigeRonde?: unknown };
+  // Een momentopname van vóór fase 13.8 heeft nog stemmen en een rondenummer: die vallen weg.
+  return { show: t.show, requests: (t.requests ?? []).filter((r) => r.status === 'queued' || r.status === 'playing'), uitslagen: t.uitslagen ?? [] };
 }
 
 /**
@@ -428,11 +302,9 @@ function uitJson(ruw: unknown): Toestand | null {
  * (één commando), en pas als die er niet is de losse sleutels (één per aanvraag). Zo kost een
  * avond met twintig telefoons die elke 4 s pollen ruim onder de 10.000 commando's.
  */
-async function huidigeToestand(code: string, nu: number) {
+async function huidigeToestand(code: string, nu: number): Promise<Toestand> {
   const vers = snapshots.get(code);
-  if (vers && nu - vers.tijd < SNAPSHOT_TTL_MS) {
-    return { toestand: vers.toestand, openstaandeCheckins: vers.checkins };
-  }
+  if (vers && nu - vers.tijd < SNAPSHOT_TTL_MS) return vers.toestand;
   // Komen er tegelijk twintig verzoeken binnen terwijl het geheugen verlopen is, dan wachten ze
   // allemaal op dezelfde lezing in plaats van elk Redis te vragen.
   const bezig = lezingen.get(code);
@@ -442,23 +314,18 @@ async function huidigeToestand(code: string, nu: number) {
   return p;
 }
 
-const lezingen = new Map<string, Promise<{ toestand: Toestand; openstaandeCheckins: Map<string, number> }>>();
+const lezingen = new Map<string, Promise<Toestand>>();
 
-async function toestandLezen(code: string, nu: number) {
+async function toestandLezen(code: string, nu: number): Promise<Toestand> {
   const redis = getRedis();
   const K = keys(code);
   let toestand = uitJson(await redis.get(K.snapshot));
-  let schrijven = false;
   if (!toestand) {
     toestand = await leesToestand(code);
-    schrijven = true;
+    await redis.set(K.snapshot, naarJson(toestand), { ex: SHOW_TTL_SEC });
   }
-  const resultaat = await checkinSweep(code, toestand, nu);
-  if (schrijven || resultaat.geschreven) {
-    await redis.set(K.snapshot, naarJson(resultaat.toestand), { ex: SHOW_TTL_SEC });
-  }
-  snapshots.set(code, { tijd: nu, toestand: resultaat.toestand, checkins: resultaat.openstaandeCheckins });
-  return resultaat;
+  snapshots.set(code, { tijd: nu, toestand });
+  return toestand;
 }
 
 /** Zorgt dat een host-klik nooit half uitgevoerd kan raken. */
@@ -481,10 +348,8 @@ async function metSlot<T>(K: Keys, naam: string, fn: () => Promise<T>): Promise<
 
 export async function leesWachtrij(code: string, deviceId: string | null): Promise<QueueResponse> {
   const nu = Date.now();
-  const { toestand, openstaandeCheckins } = await huidigeToestand(code, nu);
-  const telling = telStemmen(toestand.stemmen);
-
-  const maakEntry = (r: KaraokeRequest) => naarEntry(r, toestand, telling, deviceId);
+  const toestand = await huidigeToestand(code, nu);
+  const maakEntry = (r: KaraokeRequest) => naarEntry(r, deviceId);
 
   const wachtrij = toestand.requests
     .filter((r) => r.status === 'queued')
@@ -492,23 +357,6 @@ export async function leesWachtrij(code: string, deviceId: string | null): Promi
     .map(maakEntry);
 
   const spelend = toestand.requests.find((r) => r.status === 'playing');
-
-  const gepauzeerd = toestand.requests
-    .filter((r) => r.status === 'paused')
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .map(maakEntry);
-
-  let checkin: CheckinPrompt | null = null;
-  if (deviceId) {
-    for (const [requestId, vervaltOp] of openstaandeCheckins) {
-      const index = wachtrij.findIndex((e) => e.id === requestId);
-      if (index === -1 || !wachtrij[index].isMijn) continue;
-      // Bij meerdere: de meest urgente eerst.
-      if (checkin === null || vervaltOp < checkin.vervaltOp) {
-        checkin = { requestId, titel: wachtrij[index].titel, positie: index + 1, vervaltOp };
-      }
-    }
-  }
 
   // Een momentopname van vóór de schakelaar kent `scoresAan` niet: dan aan.
   const scoresAan = toestand.show.scoresAan !== false;
@@ -520,10 +368,6 @@ export async function leesWachtrij(code: string, deviceId: string | null): Promi
     show: { ...toestand.show, scoresAan },
     nuAanDeBeurt: spelend ? maakEntry(spelend) : null,
     wachtrij,
-    gepauzeerd,
-    checkin,
-    ronde: toestand.ronde,
-    mijnStem: deviceId ? (toestand.stemmen.get(deviceId) ?? null) : null,
     eigenAanvragen,
     maxAanvragen: maxAanvragenBij(wachtrij.length),
     leaderboard: scoresAan ? toestand.uitslagen.slice(0, LEADERBOARD).map((g) => naarUitslag(g, deviceId)) : [],
@@ -539,7 +383,7 @@ export async function leesWachtrij(code: string, deviceId: string | null): Promi
 
 /** Het leaderboard van een show, ook voor de Speler na een herstart. */
 export async function leesLeaderboard(code: string): Promise<Uitslag[]> {
-  const { toestand } = await huidigeToestand(code, Date.now());
+  const toestand = await huidigeToestand(code, Date.now());
   return toestand.uitslagen.map((g) => naarUitslag(g, null));
 }
 
@@ -591,7 +435,7 @@ export async function maakAanvraag(code: string, input: {
   const { requests } = await leesToestand(code);
 
   if (requests.some((r) => r.songId === song.id)) {
-    throw new QueueError('Dit nummer staat al in de lijst. Stem erop!', 409, 'DUBBEL');
+    throw new QueueError('Dit nummer staat al in de rij (of wordt nu gezongen).', 409, 'DUBBEL');
   }
 
   // Hoe voller de rij, hoe krapper de limiet: zo komen er meer verschillende
@@ -636,10 +480,6 @@ export async function maakAanvraag(code: string, input: {
     createdAt: nu,
     arrivalSeq,
     status: 'queued',
-    lastConfirmedAt: nu,
-    missedCheckins: 0,
-    stilstandRondes: 0,
-    vorigePositie: 0,
     verrassingOp: 0,
   });
   // Alles van een show verloopt vanzelf na twee dagen.
@@ -705,10 +545,6 @@ export async function hostToevoegen(code: string, input: {
       createdAt: nu,
       arrivalSeq,
       status: 'queued',
-      lastConfirmedAt: nu,
-      missedCheckins: 0,
-      stilstandRondes: 0,
-      vorigePositie: 0,
       verrassingOp: 0,
       viaHost: true,
     };
@@ -739,7 +575,7 @@ export async function uitslagWeg(code: string, requestId: string): Promise<{ weg
   const redis = getRedis();
   const K = keys(code);
   const weg = (await redis.srem(K.gescoord, requestId)) > 0;
-  await redis.hdel(K.request(requestId), 'score', 'labels', 'gescoordOp');
+  await redis.hdel(K.request(requestId), 'score', 'labels', 'gescoordOp', 'opbouw');
   await vergeetSnapshot(code);
   return { weg };
 }
@@ -758,35 +594,7 @@ async function haalOp(code: string, requestId: string): Promise<KaraokeRequest> 
   return request;
 }
 
-/**
- * Brengt de stem van dit apparaat uit voor de lopende ronde. Eén veld per
- * device, dus opnieuw stemmen verplaatst je stem in plaats van er een toe te
- * voegen. Wie er gestemd heeft blijft server-side; naar buiten gaan alleen
- * aantallen.
- */
-export async function stem(code: string, requestId: string, deviceId: string): Promise<{ stemmen: number }> {
-  if (!deviceId) throw new QueueError('Onbekend apparaat. Herlaad de pagina.');
-
-  const toestand = await leesToestand(code);
-  const doel = toestand.requests.find((r) => r.id === requestId);
-
-  if (!doel || doel.status !== 'queued') {
-    throw new QueueError('Op dit nummer kan niet (meer) gestemd worden.', 409);
-  }
-  if (doel.deviceId === deviceId) {
-    throw new QueueError('Je kunt niet op je eigen aanvraag stemmen.', 403);
-  }
-
-  const K = keys(code);
-  await getRedis().hset(K.rondeStemmen, { [deviceId]: requestId });
-  await getRedis().expire(K.rondeStemmen, SHOW_TTL_SEC);
-  await vergeetSnapshot(code);
-
-  toestand.stemmen.set(deviceId, requestId);
-  return { stemmen: telStemmen(toestand.stemmen).get(requestId) ?? 0 };
-}
-
-export async function bevestigCheckin(code: string, requestId: string, deviceId: string): Promise<void> {
+export async function trekIn(code: string, requestId: string, deviceId: string): Promise<void> {
   const request = await haalOp(code, requestId);
   if (request.deviceId !== deviceId) {
     throw new QueueError('Dit is niet jouw aanvraag.', 403);
@@ -794,103 +602,12 @@ export async function bevestigCheckin(code: string, requestId: string, deviceId:
   if (request.status !== 'queued') {
     throw new QueueError('Deze aanvraag staat niet meer in de wachtrij.', 409);
   }
-  await getRedis().hset(keys(code).request(requestId), { lastConfirmedAt: Date.now() });
-  await vergeetSnapshot(code);
-}
-
-export async function trekIn(code: string, requestId: string, deviceId: string): Promise<void> {
-  const request = await haalOp(code, requestId);
-  if (request.deviceId !== deviceId) {
-    throw new QueueError('Dit is niet jouw aanvraag.', 403);
-  }
-  if (request.status !== 'queued' && request.status !== 'paused') {
-    throw new QueueError('Deze aanvraag staat niet meer in de wachtrij.', 409);
-  }
   await archiveer(code, requestId, request.deviceId, 'removed');
 }
 
-/** "Ik ben er weer!" — gepauzeerde aanvraag achteraan terug in de rij. */
-export async function hervat(code: string, requestId: string, deviceId: string | null): Promise<void> {
-  const request = await haalOp(code, requestId);
-  if (deviceId !== null && request.deviceId !== deviceId) {
-    throw new QueueError('Dit is niet jouw aanvraag.', 403);
-  }
-  if (request.status !== 'paused') {
-    throw new QueueError('Deze aanvraag is niet gepauzeerd.', 409);
-  }
-
-  const nu = Date.now();
-  const redis = getRedis();
-  const K = keys(code);
-  await redis.hset(K.request(requestId), {
-    status: 'queued',
-    createdAt: nu,
-    lastConfirmedAt: nu,
-    arrivalSeq: await redis.incr(K.seqCounter),
-    stilstandRondes: 0,
-    vorigePositie: 0,
-    verrassingOp: 0,
-  });
-  await redis.sadd(K.live, requestId);
-  await redis.expire(K.request(requestId), SHOW_TTL_SEC);
-  await vergeetSnapshot(code);
-}
-
 // ---------------------------------------------------------------------------
-// Stemronde
+// Volgorde
 // ---------------------------------------------------------------------------
-
-/**
- * De winnaar van de ronde: meeste stemmen, bij gelijke stand het nummer dat het
- * langst in de rij staat. Zonder stemmen is er geen winnaar en springt niemand.
- */
-function bepaalWinnaar(
-  wachtrij: KaraokeRequest[],
-  stemmen: Map<string, string>
-): KaraokeRequest | null {
-  const telling = telStemmen(stemmen);
-  let winnaar: KaraokeRequest | null = null;
-  let hoogste = 0;
-
-  // De wachtrij is al op arrivalSeq gesorteerd, dus de eerste met het hoogste
-  // aantal is meteen de langst wachtende — dat is precies de tie-break.
-  for (const request of wachtrij) {
-    const aantal = telling.get(request.id) ?? 0;
-    if (aantal > hoogste) {
-      hoogste = aantal;
-      winnaar = request;
-    }
-  }
-  return hoogste > 0 ? winnaar : null;
-}
-
-/**
- * Zet de winnaar vooruit: één plek, of twee bij een volle rij. Een aanvraag die
- * al twee rondes stilstaat kan niet ingehaald worden; de winnaar landt er dan
- * direct onder.
- */
-function verplaatsWinnaar(wachtrij: KaraokeRequest[], winnaar: KaraokeRequest): KaraokeRequest[] {
-  const vanaf = wachtrij.findIndex((r) => r.id === winnaar.id);
-  if (vanaf <= 0) return wachtrij;
-
-  const sprong = wachtrij.length >= GROTE_RIJ_VANAF ? SPRONG_VOLLE_RIJ : SPRONG_KORTE_RIJ;
-  let naar = Math.max(0, vanaf - sprong);
-
-  // Van dichtbij naar ver kijken: de eerste beschermde aanvraag die we zouden
-  // passeren bepaalt waar we landen.
-  for (let i = vanaf - 1; i >= naar; i--) {
-    if (isBeschermd(wachtrij[i])) {
-      naar = i + 1;
-      break;
-    }
-  }
-  if (naar >= vanaf) return wachtrij;
-
-  const nieuw = [...wachtrij];
-  nieuw.splice(vanaf, 1);
-  nieuw.splice(naar, 0, winnaar);
-  return nieuw;
-}
 
 /**
  * Deelt de bestaande volgnummers opnieuw uit volgens de nieuwe volgorde. Zo
@@ -918,16 +635,12 @@ function herverdeelVolgnummers(
 
 export interface StartResultaat {
   gestart: { id: string; titel: string; zangerNaam: string };
-  /** De winnaar van de zojuist afgerekende ronde, als er gestemd was. */
-  winnaar: { id: string; titel: string; stemmen: number; gesprongen: boolean } | null;
-  ronde: number;
 }
 
 /**
- * Eén klik van de host doet alles tegelijk: de lopende ronde afrekenen en de
- * winnaar laten springen, het aangeklikte nummer aan de beurt laten zijn, en
- * daarna de stemmen wissen zodat de volgende ronde begint. Het slot zorgt dat
- * er nooit een halve ronde kan ontstaan.
+ * Eén klik van de host: het aangeklikte nummer is aan de beurt en het vorige is klaar. Sinds
+ * fase 13.8 zonder stemronde: de rij is puur de volgorde van binnenkomst plus wat de host doet.
+ * Het slot zorgt dat twee klikken elkaar niet kruisen.
  */
 export async function hostStart(code: string, requestId: string): Promise<StartResultaat> {
   const K = keys(code);
@@ -936,77 +649,17 @@ export async function hostStart(code: string, requestId: string): Promise<StartR
     await vergeetSnapshot(code);
 
     const toestand = await leesToestand(code);
-    const wachtrij = toestand.requests.filter((r) => r.status === 'queued').sort(opVolgorde);
-    const doel = wachtrij.find((r) => r.id === requestId);
+    const doel = toestand.requests.find((r) => r.id === requestId && r.status === 'queued');
     if (!doel) {
       throw new QueueError('Dit nummer staat niet (meer) in de wachtrij.', 409, 'WEG');
     }
 
-    // 1. Ronde afrekenen. Wie zelf gestart wordt hoeft niet meer te springen.
-    const winnaar = bepaalWinnaar(wachtrij, toestand.stemmen);
-    const telling = telStemmen(toestand.stemmen);
-    const nieuweVolgorde =
-      winnaar !== null && winnaar.id !== requestId
-        ? verplaatsWinnaar(wachtrij, winnaar)
-        : wachtrij;
-    // Een beschermde aanvraag kan de sprong blokkeren, dus pas achteraf is
-    // duidelijk of de winnaar daadwerkelijk opgeschoven is.
-    const springt =
-      winnaar !== null &&
-      nieuweVolgorde.findIndex((r) => r.id === winnaar.id) <
-        wachtrij.findIndex((r) => r.id === winnaar.id);
-
-    const schrijf = redis.pipeline();
-    for (const { request, arrivalSeq } of herverdeelVolgnummers(wachtrij, nieuweVolgorde)) {
-      request.arrivalSeq = arrivalSeq;
-      schrijf.hset(K.request(request.id), { arrivalSeq });
-    }
-
-    // 2. Het aangeklikte nummer gaat de rij uit en wordt "nu aan de beurt".
-    const rest = nieuweVolgorde.filter((r) => r.id !== requestId);
-
-    // 3. Stilstand bijwerken op de posities zoals ze er ná deze ronde bij staan.
-    rest.forEach((request, index) => {
-      const positie = index + 1;
-      const opgeschoven = request.vorigePositie === 0 || positie < request.vorigePositie;
-      const stilstandRondes = opgeschoven ? 0 : request.stilstandRondes + 1;
-
-      if (stilstandRondes !== request.stilstandRondes || positie !== request.vorigePositie) {
-        request.stilstandRondes = stilstandRondes;
-        request.vorigePositie = positie;
-        schrijf.hset(K.request(request.id), { stilstandRondes, vorigePositie: positie });
-      }
-    });
-
-    // 4. Het vorige nummer is klaar; het nieuwe gaat spelen.
     const vorige = toestand.requests.find((r) => r.status === 'playing');
-    schrijf.hset(K.request(requestId), { status: 'playing', verrassingOp: 0 });
-
-    // 5. Stemmen wissen en de nieuwe ronde starten.
-    schrijf.del(K.rondeStemmen);
-    schrijf.incr(K.rondeNummer);
-    schrijf.expire(K.rondeNummer, SHOW_TTL_SEC);
-    if (winnaar) {
-      schrijf.set(K.rondeWinnaar, winnaar.id);
-      schrijf.expire(K.rondeWinnaar, SHOW_TTL_SEC);
-    } else schrijf.del(K.rondeWinnaar);
-
-    await schrijf.exec();
-    if (vorige) await archiveer(code, vorige.id, vorige.deviceId, 'done', undefined, false);
+    await redis.hset(K.request(requestId), { status: 'playing', verrassingOp: 0 });
+    if (vorige) await archiveer(code, vorige.id, vorige.deviceId, 'done', false);
     await vergeetSnapshot(code);
 
-    return {
-      gestart: { id: doel.id, titel: doel.titel, zangerNaam: doel.zangerNaam },
-      winnaar: winnaar
-        ? {
-            id: winnaar.id,
-            titel: winnaar.titel,
-            stemmen: telling.get(winnaar.id) ?? 0,
-            gesprongen: springt,
-          }
-        : null,
-      ronde: toestand.ronde + 1,
-    };
+    return { gestart: { id: doel.id, titel: doel.titel, zangerNaam: doel.zangerNaam } };
   });
 }
 
@@ -1018,12 +671,8 @@ export async function hostSkip(code: string, requestId: string): Promise<void> {
   }
   const redis = getRedis();
   const K = keys(code);
-  const nu = Date.now();
   await redis.hset(K.request(requestId), {
     arrivalSeq: await redis.incr(K.seqCounter),
-    lastConfirmedAt: nu,
-    stilstandRondes: 0,
-    vorigePositie: 0,
     // Naar achteren betekent naar achteren: een verrassingskeuze vervalt.
     verrassingOp: 0,
   });
@@ -1035,14 +684,9 @@ export async function hostVerwijder(code: string, requestId: string): Promise<vo
   await archiveer(code, requestId, request.deviceId, 'removed');
 }
 
-/** Host zet een gepauzeerde aanvraag terug in de rij. */
-export async function hostHerstel(code: string, requestId: string): Promise<void> {
-  await hervat(code, requestId, null);
-}
-
 /**
  * Het spelende nummer is afgelopen zonder dat er een volgende start (de Speler van de
- * Showcomposer, fase 13): het podium is leeg, de stemronde loopt gewoon door.
+ * Showcomposer, fase 13): het podium is leeg.
  */
 export async function hostKlaar(code: string): Promise<{ id: string } | null> {
   const toestand = await leesToestand(code);
@@ -1059,13 +703,15 @@ export async function hostKlaar(code: string): Promise<{ id: string } | null> {
  */
 export async function uitslagBewaren(
   code: string,
-  input: { requestId: string; score: unknown; labels: unknown }
+  input: { requestId: string; score: unknown; labels: unknown; opbouw?: unknown }
 ): Promise<Uitslag> {
   const score = Number(input.score);
   if (!Number.isFinite(score) || score < 0 || score > 10000) {
     throw new QueueError('De score moet een getal van 0 tot 10.000 zijn.');
   }
   const labels = parseLijst(input.labels).slice(0, 4).map((l) => l.slice(0, 40));
+  // Fase 13.8: de opbouw (meter, klassieker, herhaling, bonus) is optioneel; de Speler rekent, hier staat hij alleen.
+  const opbouw = parseOpbouw(input.opbouw);
   const request = await haalOp(code, input.requestId);
   if (request.status !== 'playing' && request.status !== 'done') {
     throw new QueueError('Dit nummer is nog niet gezongen.', 409);
@@ -1074,7 +720,7 @@ export async function uitslagBewaren(
   const K = keys(code);
   const tijd = Date.now();
   const pipe = redis.pipeline();
-  pipe.hset(K.request(request.id), { score, labels: JSON.stringify(labels), gescoordOp: tijd });
+  pipe.hset(K.request(request.id), { score, labels: JSON.stringify(labels), gescoordOp: tijd, opbouw: opbouw ? JSON.stringify(opbouw) : '' });
   pipe.sadd(K.gescoord, request.id);
   pipe.expire(K.request(request.id), SHOW_TTL_SEC);
   pipe.expire(K.gescoord, SHOW_TTL_SEC);
@@ -1090,13 +736,14 @@ export async function uitslagBewaren(
     score,
     labels,
     tijd,
+    opbouw,
     isMijn: false,
   };
 }
 
 /**
- * Trekt een willekeurig nummer van buiten de beschermde top naar positie 1.
- * Bedoeld voor een volle lijst, zodat de onderkant ook een kans maakt.
+ * Trekt een willekeurig nummer van buiten de top naar positie 1. Bedoeld voor een volle lijst,
+ * zodat de onderkant ook een kans maakt; de top blijft staan, die is bijna aan de beurt.
  */
 export async function hostVerrassing(code: string): Promise<{ id: string; titel: string; positie: number }> {
   const K = keys(code);

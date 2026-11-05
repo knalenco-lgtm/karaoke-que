@@ -59,43 +59,6 @@ function meldt(titel: string, tekst: string, tag: string): void {
 }
 
 /**
- * Trekt de aandacht zolang `actief` waar is: trilsignaal + browsermelding bij
- * het verschijnen, en een knipperende tab-titel zolang de tab op de achtergrond
- * staat. Herhaalt het trilsignaal elke 30 seconden.
- */
-export function useAandacht(actief: boolean, titel: string, tekst: string): void {
-  const origineleTitel = useRef<string>('');
-
-  useEffect(() => {
-    if (!actief) return;
-
-    origineleTitel.current = document.title;
-    trilt([200, 100, 200, 100, 400]);
-    meldt(titel, tekst, 'karaoke-checkin');
-
-    const herhaal = setInterval(() => {
-      trilt([200, 100, 200, 100, 400]);
-      if (document.visibilityState !== 'visible') meldt(titel, tekst, 'karaoke-checkin');
-    }, 30_000);
-
-    let aan = false;
-    const knipper = setInterval(() => {
-      aan = !aan;
-      document.title = aan ? `🎤 ${titel}` : origineleTitel.current;
-    }, 900);
-
-    return () => {
-      clearInterval(herhaal);
-      clearInterval(knipper);
-      document.title = origineleTitel.current;
-    };
-    // `titel`/`tekst` bewust buiten de deps: die veranderen bij elke poll mee
-    // (positie schuift op) en zouden het trilsignaal steeds opnieuw starten.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actief]);
-}
-
-/**
  * Waarschuwt zodra een eigen nummer bijna aan de beurt is: één melding bij #2
  * en één bij #1, per aanvraag. Draait bij elke poll mee, maar de set met al
  * gemelde combinaties zorgt dat er niets dubbel afgaat.

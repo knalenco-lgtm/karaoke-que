@@ -1,10 +1,24 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import type { Uitslag } from '@/lib/types';
+import type { ScoreOpbouw, Uitslag } from '@/lib/types';
 import { zangersTekst } from '@/lib/zangers';
 
 const getal = (n: number) => Math.round(n).toLocaleString('nl-NL');
+const bedrag = (n: number) => (n < 0 ? '\u2212' : '+') + getal(Math.abs(n));
+
+/**
+ * Fase 13.8: de opbouw van een score in één regel ("Meter 8.260 · Klassieker +500 · Jury +250"),
+ * alleen als er een correctie is.
+ */
+export function opbouwTekst(o: ScoreOpbouw | null): string {
+  if (!o || (!o.klassieker && !o.herhaling && !o.bonus)) return '';
+  const delen = [`Meter ${getal(o.meter)}`];
+  if (o.klassieker) delen.push(`Klassieker ${bedrag(o.klassieker)}`);
+  if (o.herhaling) delen.push(`Herhaling ${bedrag(o.herhaling)}`);
+  if (o.bonus) delen.push(`Jury ${bedrag(o.bonus)}`);
+  return delen.join(' · ');
+}
 
 /** Fase 13: de score van de Knal-meter voor je eigen optreden, met de labels. */
 export function JouwScore({ uitslagen }: { uitslagen: Uitslag[] }) {
@@ -14,6 +28,7 @@ export function JouwScore({ uitslagen }: { uitslagen: Uitslag[] }) {
     <section className="kaart gloed mt-6 px-5 py-5 text-center" aria-live="polite">
       <p className="kop text-base tracking-[0.18em] text-tekst/60">De Knal-meter zegt</p>
       <p className="kop verlooptekst mt-1 text-7xl leading-none tabular-nums">{getal(laatste.score)}</p>
+      {opbouwTekst(laatste.opbouw) && <p className="mt-1 text-xs text-tekst/60">{opbouwTekst(laatste.opbouw)}</p>}
       <p className="mt-2 text-sm text-tekst/70">
         {laatste.titel} · {laatste.artiest}
       </p>
@@ -47,9 +62,12 @@ export function Leaderboard({ lijst }: { lijst: Uitslag[] }) {
         {lijst.map((u, i) => (
           <li key={u.id} className={`flex items-baseline gap-3 ${u.isMijn ? 'text-roze' : ''}`}>
             <span className="kop verlooptekst w-6 shrink-0 text-xl">{i + 1}</span>
-            <span className="min-w-0 flex-1 truncate text-sm">
-              <strong>{zangersTekst(u.zangerNaam, u.extraSingers)}</strong>
-              <span className="text-tekst/50"> · {u.titel}</span>
+            <span className="min-w-0 flex-1 text-sm">
+              <span className="block truncate">
+                <strong>{zangersTekst(u.zangerNaam, u.extraSingers)}</strong>
+                <span className="text-tekst/50"> · {u.titel}</span>
+              </span>
+              {opbouwTekst(u.opbouw) && <span className="block truncate text-xs text-tekst/50">{opbouwTekst(u.opbouw)}</span>}
             </span>
             <span className="kop text-xl tabular-nums">{getal(u.score)}</span>
           </li>

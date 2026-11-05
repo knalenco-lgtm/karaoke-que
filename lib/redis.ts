@@ -41,7 +41,7 @@ export function keys(code: string) {
   return {
     /** Hash met de velden van één aanvraag. */
     request: (id: string) => `${p}req:${id}`,
-    /** Set met alle aanvraag-ids die nog leven (queued, playing of paused). */
+    /** Set met alle aanvraag-ids die nog leven (queued of playing). */
     live: `${p}live`,
     /** Set met de aanvraag-ids die een score van de Knal-meter hebben (voor het leaderboard). */
     gescoord: `${p}gescoord`,
@@ -51,17 +51,6 @@ export function keys(code: string) {
     counter: `${p}request:counter`,
     /** Teller voor het volgnummer in de wachtrij (arrivalSeq). */
     seqCounter: `${p}seq:counter`,
-
-    /**
-     * Stemmen van de lopende ronde: hash deviceId -> requestId. Eén veld per
-     * telefoon, dus opnieuw stemmen overschrijft je vorige stem. Wordt bij elke
-     * nieuwe ronde in z'n geheel weggegooid.
-     */
-    rondeStemmen: `${p}ronde:stemmen`,
-    /** Nummer van de lopende ronde; de client ziet hieraan dat er een nieuwe is. */
-    rondeNummer: `${p}ronde:nummer`,
-    /** Winnaar van de vorige ronde, voor de 🏆-badge. */
-    rondeWinnaar: `${p}ronde:winnaar`,
 
     /**
      * De momentopname van de hele rij als één JSON-string: lezen kost dan één

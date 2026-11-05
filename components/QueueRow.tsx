@@ -67,8 +67,6 @@ function Badges({ entry, positie }: { entry: QueueEntry; positie: number }) {
   const labels: string[] = [];
   if (positie === 1 && entry.verrassingOp > 0) labels.push('🎲 verrassingskeuze');
   if (entry.viaHost) labels.push('🎤 via host');
-  if (entry.isWinnaarVorigeRonde) labels.push('🏆 winnaar vorige ronde');
-  if (entry.isBeschermd) labels.push('🛡️ kan niet meer ingehaald worden');
 
   if (labels.length === 0) return null;
 
@@ -78,46 +76,5 @@ function Badges({ entry, positie }: { entry: QueueEntry; positie: number }) {
         <span key={label}>{label}</span>
       ))}
     </p>
-  );
-}
-
-/** Stemknop met de stand van deze ronde. */
-export function StemKnop({
-  entry,
-  onStem,
-  bezig,
-}: {
-  entry: QueueEntry;
-  onStem: () => void;
-  bezig: boolean;
-}) {
-  const uit = !entry.magStemmen || bezig;
-  const label = entry.isMijn
-    ? 'Je eigen aanvraag'
-    : entry.heeftMijnStem
-      ? 'Hier gaat je stem deze ronde naartoe'
-      : `Stem deze ronde op ${entry.titel}`;
-
-  return (
-    <button
-      type="button"
-      onClick={onStem}
-      disabled={uit}
-      aria-label={label}
-      title={label}
-      className={`flex min-h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl border
-                  transition-colors ${
-                    entry.heeftMijnStem
-                      ? 'border-oranje/70 bg-oranje/20 text-oranje-licht'
-                      : uit
-                        ? 'border-white/10 text-tekst/40'
-                        : 'border-roze/50 bg-roze/15 text-roze active:bg-roze/35'
-                  }`}
-    >
-      <span aria-hidden="true" className="text-lg leading-none">
-        {entry.heeftMijnStem ? '★' : '▲'}
-      </span>
-      <span className="text-sm leading-tight font-bold tabular-nums">{entry.stemmen}</span>
-    </button>
   );
 }

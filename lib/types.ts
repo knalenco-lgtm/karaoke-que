@@ -1,8 +1,10 @@
 /**
  * `playing` is het nummer dat op dit moment gezongen wordt: dat staat niet meer
- * in de wachtrij. Alleen `queued`, `playing` en `paused` tellen als "levend".
+ * in de wachtrij. Alleen `queued` en `playing` tellen als "levend". (Sinds fase 13.8 is er
+ * geen check-in meer, dus ook geen `paused`: een aanvraag blijft staan tot hij gezongen is of
+ * de host hem weghaalt.)
  */
-export type RequestStatus = 'queued' | 'playing' | 'paused' | 'done' | 'removed';
+export type RequestStatus = 'queued' | 'playing' | 'done' | 'removed';
 
 /** Zoals opgeslagen in Redis (hash `req:{id}`). */
 export interface KaraokeRequest {
@@ -17,17 +19,11 @@ export interface KaraokeRequest {
   createdAt: number;
   /**
    * Bepaalt de plek in de wachtrij: laag is vooraan. Start als volgnummer van
-   * binnenkomst en verschuift alleen door een rondesprong, een skip of de
+   * binnenkomst en verschuift alleen door een skip, "als volgende" of de
    * verrassingskeuze van de host.
    */
   arrivalSeq: number;
   status: RequestStatus;
-  lastConfirmedAt: number;
-  missedCheckins: number;
-  /** Aantal rondes op rij zonder op te schuiven; vanaf 2 is de aanvraag beschermd. */
-  stilstandRondes: number;
-  /** Positie aan het eind van de vorige ronde (0 = nog niet gemeten). */
-  vorigePositie: number;
   /** Tijdstip waarop de host dit nummer als verrassing naar voren trok (0 = nooit). */
   verrassingOp: number;
   /** Door de host aangemeld (de Speler van de Showcomposer), niet door een gast. */
@@ -45,32 +41,12 @@ export interface QueueEntry {
   createdAt: number;
   arrivalSeq: number;
   status: RequestStatus;
-  /** Aantal stemmen in de lopende ronde. */
-  stemmen: number;
-  missedCheckins: number;
-  /** Kan niet meer ingehaald worden door de rondewinnaar. */
-  isBeschermd: boolean;
-  /** Won de vorige stemronde; badge blijft tot de volgende ronde is afgerekend. */
-  isWinnaarVorigeRonde: boolean;
   /** Door de host als verrassing naar voren getrokken (0 = nee). */
   verrassingOp: number;
   /** Door de host aangemeld, niet door een gast. */
   viaHost: boolean;
   /** Is deze aanvraag van het opvragende device? */
   isMijn: boolean;
-  /** Heeft het opvragende device deze ronde op dit nummer gestemd? */
-  heeftMijnStem: boolean;
-  /** Mag het opvragende device hierop stemmen? (niet op je eigen aanvraag) */
-  magStemmen: boolean;
-}
-
-/** Openstaande check-in voor het opvragende device. */
-export interface CheckinPrompt {
-  requestId: string;
-  titel: string;
-  positie: number;
-  /** Deadline (epoch ms) waarop de aanvraag gepauzeerd wordt. */
-  vervaltOp: number;
 }
 
 /** De uitslag van de Knal-meter voor één optreden (Showcomposer, fase 13). */
@@ -87,7 +63,20 @@ export interface Uitslag {
   labels: string[];
   /** Epoch ms waarop de score binnenkwam. */
   tijd: number;
+  /**
+   * Fase 13.8: de opbouw van de score: de meterscore plus de klassiekerbonus, de aftrek bij een
+   * herhaling en de bonus van de jury (elk 0 als het niet geldt). Null bij een score zonder opbouw.
+   */
+  opbouw: ScoreOpbouw | null;
   isMijn: boolean;
+}
+
+export interface ScoreOpbouw {
+  meter: number;
+  klassieker: number;
+  /** Negatief of 0. */
+  herhaling: number;
+  bonus: number;
 }
 
 export interface ShowInfo {
@@ -105,13 +94,7 @@ export interface QueueResponse {
   /** Het nummer dat nu gezongen wordt; staat niet in `wachtrij`. */
   nuAanDeBeurt: QueueEntry | null;
   wachtrij: QueueEntry[];
-  gepauzeerd: QueueEntry[];
-  checkin: CheckinPrompt | null;
-  /** Nummer van de lopende stemronde; wijzigt betekent: nieuwe ronde. */
-  ronde: number;
-  /** Waar dit device deze ronde op gestemd heeft, of null. */
-  mijnStem: string | null;
-  /** Aantal openstaande aanvragen van dit device (queued + playing + paused). */
+  /** Aantal openstaande aanvragen van dit device (queued + playing). */
   eigenAanvragen: number;
   /** Hoeveel aanvragen één telefoon nu open mag hebben; zakt naar 1 bij een drukke rij. */
   maxAanvragen: number;

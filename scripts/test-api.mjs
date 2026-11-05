@@ -18,13 +18,9 @@ const APP_POORT = 3111;
 const BASE = process.env.BASE_URL ?? `http://127.0.0.1:${APP_POORT}`;
 const PIN = process.env.HOST_PIN ?? '4821';
 
-// Spiegelt lib/constants.ts — een .mjs-script kan geen TypeScript importeren.
+// Spiegelt lib/constants.ts (een .mjs-script kan geen TypeScript importeren).
 const VERRASSING_MIN_RIJ = 30;
 const VERRASSING_BESCHERMDE_TOP = 5;
-const GROTE_RIJ_VANAF = 7;
-const SPRONG_KORTE_RIJ = 1;
-const SPRONG_VOLLE_RIJ = 2;
-const BESCHERMING_NA_RONDES = 2;
 const MAX_AANVRAGEN_PER_DEVICE = 2;
 const MAX_AANVRAGEN_DRUKKE_RIJ = 1;
 const DRUKKE_RIJ_VANAF = 11;
@@ -232,82 +228,30 @@ async function testen() {
     JSON.stringify(derde.data)
   );
 
-  // --- Stemmen (rondemodel) -----------------------------------------------
-  console.log('\nStemmen');
-  check(
-    'stemmen op andermans nummer lukt',
-    (await api('/api/vote', { method: 'POST', body: { requestId: idB, deviceId: DEVICE_B } }))
-      .status === 200
-  );
-
-  const nogmaals = await api('/api/vote', {
-    method: 'POST',
-    body: { requestId: idB, deviceId: DEVICE_B },
-  });
-  check('nogmaals op hetzelfde nummer stemmen is geen fout', nogmaals.status === 200);
-  check('...en levert nog steeds één stem op', nogmaals.data?.stemmen === 1);
-
-  check(
-    'stemmen op je eigen nummer wordt geweigerd',
-    (await api('/api/vote', { method: 'POST', body: { requestId: idB, deviceId: DEVICE_A } }))
-      .status === 403
-  );
-
-  const verplaatst = await api('/api/vote', {
-    method: 'POST',
-    body: { requestId: idA, deviceId: DEVICE_B },
-  });
-  check('op een ander nummer stemmen verplaatst je stem', verplaatst.data?.stemmen === 1);
-  const naVerplaatsing = await api('/api/queue');
-  check(
-    '...en het vorige nummer staat weer op nul',
-    naVerplaatsing.data?.wachtrij?.find((e) => e.id === idB)?.stemmen === 0,
-    JSON.stringify(naVerplaatsing.data?.wachtrij?.map((e) => [e.id, e.stemmen]))
-  );
-
-  // Terugzetten voor de rest van de tests.
-  await api('/api/vote', { method: 'POST', body: { requestId: idB, deviceId: DEVICE_B } });
-
   // --- Wachtrij ------------------------------------------------------------
   console.log('\nWachtrij');
   const rij = await api(`/api/queue?deviceId=${DEVICE_A}`);
   check('wachtrij bevat beide aanvragen', rij.data?.wachtrij?.length === 2);
   check(
-    'de rij staat op volgorde van binnenkomst, niet op stemmen',
+    'de rij staat op volgorde van binnenkomst',
     rij.data?.wachtrij?.[0]?.id === idA && rij.data?.wachtrij?.[1]?.id === idB,
     `volgorde: ${rij.data?.wachtrij?.map((e) => e.id).join(', ')}`
   );
+  check('geen stemronde en geen check-in meer in het antwoord (fase 13.8)', !('ronde' in rij.data) && !('checkin' in rij.data) && !('gepauzeerd' in rij.data) && !('stemmen' in rij.data.wachtrij[0]));
   check('er speelt nog niks', rij.data?.nuAanDeBeurt === null);
   check('eigen aanvragen zijn gemarkeerd', rij.data?.wachtrij?.every((e) => e.isMijn === true));
   check('eigen aanvragen worden geteld', rij.data?.eigenAanvragen === 2);
 
   const rijB = await api(`/api/queue?deviceId=${DEVICE_B}`);
-  const entryB = rijB.data?.wachtrij?.find((e) => e.id === idB);
-  check('device B ziet waar zijn stem heen ging', entryB?.heeftMijnStem === true);
-  check('...en de response noemt dat nummer', rijB.data?.mijnStem === idB);
-  check('op je eigen keuze nog eens stemmen heeft geen zin', entryB?.magStemmen === false);
+  check('een ander device ziet de aanvragen niet als de zijne', rijB.data?.wachtrij?.every((e) => e.isMijn === false));
   check(
-    'niemand kan zien wie er gestemd heeft',
-    !JSON.stringify(rijB.data).includes(DEVICE_B),
+    'niemand kan zien van welk apparaat een aanvraag is',
+    !JSON.stringify(rijB.data).includes(DEVICE_A),
     'deviceId lekt in de queue-response'
   );
-
-  // --- Check-in ------------------------------------------------------------
-  console.log('\nCheck-in');
-  check(
-    'check-in bevestigen lukt',
-    (await api('/api/checkin', { method: 'POST', body: { requestId: idA, deviceId: DEVICE_A } }))
-      .status === 200
-  );
-  check(
-    'check-in van een ander device wordt geweigerd',
-    (await api('/api/checkin', { method: 'POST', body: { requestId: idA, deviceId: DEVICE_B } }))
-      .status === 403
-  );
-  check(
-    'nog geen check-in nodig bij een verse rij',
-    (await api(`/api/queue?deviceId=${DEVICE_A}`)).data?.checkin === null
-  );
+  const oudeRoutes = ['vote', 'checkin'];
+  const oud404 = await Promise.all(oudeRoutes.map((r) => api(`/api/${r}`, { method: 'POST', body: { requestId: idA, deviceId: DEVICE_B } })));
+  check('de oude routes voor stemmen en check-in bestaan niet meer', oud404.every((r) => r.status === 404), oud404.map((r) => r.status).join());
 
   // --- Host ----------------------------------------------------------------
   console.log('\nHost');
@@ -338,25 +282,18 @@ async function testen() {
     `volgorde: ${naSkip.data?.wachtrij?.map((e) => e.id).join(', ')}`
   );
 
-  // idB heeft de enige stem en staat nu vooraan; door hem te starten vervalt de sprong.
   const gestart = await api('/api/host', {
     method: 'POST',
     body: { actie: 'start', requestId: idB },
     pin: PIN,
   });
-  check('de host kan een nummer starten', gestart.status === 200, JSON.stringify(gestart.data));
-  check(
-    'de sprong vervalt als de winnaar zelf gestart wordt',
-    gestart.data?.start?.winnaar?.id === idB && gestart.data?.start?.winnaar?.gesprongen === false,
-    JSON.stringify(gestart.data?.start?.winnaar)
-  );
+  check('de host kan een nummer starten', gestart.status === 200 && gestart.data?.start?.gestart?.id === idB, JSON.stringify(gestart.data));
 
   const naStart = await api('/api/queue');
   check('het gestarte nummer is nu aan de beurt', naStart.data?.nuAanDeBeurt?.id === idB);
   check('...en staat niet meer in de wachtrij', !naStart.data?.wachtrij?.some((e) => e.id === idB));
-  check('de stemmen zijn gewist', naStart.data?.wachtrij?.every((e) => e.stemmen === 0));
-  check('er loopt een nieuwe ronde', naStart.data?.ronde === 2);
-  check('de winnaar heeft de bekerbadge', naStart.data?.nuAanDeBeurt?.isWinnaarVorigeRonde === true);
+  check('de rest blijft op volgorde staan', naStart.data?.wachtrij?.[0]?.id === idA);
+  check('het antwoord noemt geen stemronde meer', !('winnaar' in (gestart.data?.start ?? {})) && !('ronde' in (gestart.data?.start ?? {})));
 
   const alGestart = await api('/api/host', {
     method: 'POST',
@@ -450,8 +387,8 @@ async function testen() {
   );
 
   if (!EXTERN) {
-    // Een aanvraag zoals die vóór de duet- en stemronde-uitbreidingen werd
-    // weggeschreven: zonder extraSingers, verrassingOp en arrivalSeq.
+    // Een aanvraag zoals die vóór de duet-uitbreiding werd weggeschreven: zonder
+    // extraSingers, verrassingOp en arrivalSeq, met de oude check-in-velden erbij.
     const toen = String(Date.now());
     await redisCmd([
       'hset', sk('req:legacy-1'),
@@ -485,6 +422,14 @@ async function testen() {
       `arrivalSeq ${legacyEntry?.arrivalSeq}, verwacht ${toen}`
     );
 
+    // Een aanvraag die vóór fase 13.8 gepauzeerd was (check-in gemist) komt gewoon terug in de rij.
+    await redisCmd(['hset', sk('req:legacy-2'), 'songId', duetSongs[5].id, 'titel', 'Gepauzeerd', 'artiest', 'Toen', 'zangerNaam', 'Opa', 'deviceId', 'dev-legacy', 'createdAt', toen, 'arrivalSeq', '3', 'status', 'paused', 'missedCheckins', '1']);
+    await redisCmd(['sadd', sk('live'), 'legacy-2']);
+    await snapshotWeg();
+    await wacht(3200);
+    check('een oude gepauzeerde aanvraag staat weer gewoon in de rij', (await api('/api/queue')).data?.wachtrij?.some((e) => e.id === 'legacy-2'));
+    await api('/api/host', { method: 'POST', body: { actie: 'verwijder', requestId: 'legacy-2' }, pin: PIN });
+
     // Zo'n oude aanvraag heeft een enorm volgnummer (epoch-ms). Een nieuw
     // nummer moet er nog steeds achter komen, niet ervoor.
     const naLegacy = await api('/api/request', {
@@ -515,9 +460,8 @@ async function testen() {
   }
   check('wachtrij is na het opruimen weer leeg', (await api('/api/queue')).data?.wachtrij?.length === 0);
 
-  // --- Stemronde ------------------------------------------------------------
-  console.log('\nStemronde');
-
+  // --- Skip en start zonder stemronde --------------------------------------
+  console.log('\nVolgorde');
   // Voorraadje nummers om steeds verse rijen mee op te bouwen.
   const voorraad = [];
   const gezien = new Set();
@@ -567,117 +511,27 @@ async function testen() {
     return ids;
   }
 
-  const stemOp = (id, kiezer) =>
-    api('/api/vote', { method: 'POST', body: { requestId: id, deviceId: kiezer } });
   const startNummer = (id) =>
     api('/api/host', { method: 'POST', body: { actie: 'start', requestId: id }, pin: PIN });
   const volgorde = async () => ((await api('/api/queue')).data?.wachtrij ?? []).map((e) => e.id);
 
-  // Korte rij: de winnaar schuift één plek op.
-  const kort = await nieuweRij(5, 'kort');
-  await stemOp(kort[3], 'kiezer-1');
-  await stemOp(kort[3], 'kiezer-2');
-  const rondeKort = await startNummer(kort[0]);
-  check(
-    'winnaar en stemaantal worden teruggemeld',
-    rondeKort.data?.start?.winnaar?.id === kort[3] &&
-      rondeKort.data.start.winnaar.stemmen === 2 &&
-      rondeKort.data.start.winnaar.gesprongen === true,
-    JSON.stringify(rondeKort.data?.start?.winnaar)
-  );
-  check(
-    `winnaar springt ${SPRONG_KORTE_RIJ} plek bij een rij onder de ${GROTE_RIJ_VANAF}`,
-    (await volgorde()).join() === [kort[1], kort[3], kort[2], kort[4]].join(),
-    `volgorde: ${(await volgorde()).join(', ')}`
-  );
-  const naRondeKort = await api('/api/queue');
-  check('alle stemmen zijn gewist na de ronde', naRondeKort.data.wachtrij.every((e) => e.stemmen === 0));
-  check(
-    'de winnaar draagt de bekerbadge',
-    naRondeKort.data.wachtrij.find((e) => e.id === kort[3])?.isWinnaarVorigeRonde === true
-  );
-
-  // Volle rij: de winnaar schuift twee plekken op.
-  const vol7 = await nieuweRij(GROTE_RIJ_VANAF, 'vol');
-  await stemOp(vol7[4], 'kiezer-1');
-  await startNummer(vol7[0]);
-  check(
-    `winnaar springt ${SPRONG_VOLLE_RIJ} plekken vanaf ${GROTE_RIJ_VANAF} nummers`,
-    (await volgorde()).join() ===
-      [vol7[1], vol7[4], vol7[2], vol7[3], vol7[5], vol7[6]].join(),
-    `volgorde: ${(await volgorde()).join(', ')}`
-  );
-
-  // Gelijke stand: wie het langst in de rij staat wint.
-  const gelijk = await nieuweRij(5, 'gel');
-  await stemOp(gelijk[2], 'kiezer-1');
-  await stemOp(gelijk[3], 'kiezer-2');
-  const rondeGelijk = await startNummer(gelijk[0]);
-  check(
-    'bij gelijke stand wint wie het langst in de rij staat',
-    rondeGelijk.data?.start?.winnaar?.id === gelijk[2],
-    `winnaar: ${rondeGelijk.data?.start?.winnaar?.id}, verwacht ${gelijk[2]}`
-  );
-
-  // Zonder stemmen verschuift er niets.
-  const stil = await nieuweRij(4, 'stil');
-  const rondeStil = await startNummer(stil[0]);
-  check('zonder stemmen is er geen winnaar', rondeStil.data?.start?.winnaar === null);
-  check(
-    '...en blijft de volgorde ongewijzigd',
-    (await volgorde()).join() === [stil[1], stil[2], stil[3]].join()
-  );
-
-  // Host start een ander nummer dan #1.
+  // De host start een nummer midden uit de rij: de rest blijft precies staan.
   const midden = await nieuweRij(5, 'mid');
-  await stemOp(midden[4], 'kiezer-1');
   await startNummer(midden[2]);
-  check(
-    'host mag een nummer midden uit de rij starten',
-    (await api('/api/queue')).data?.nuAanDeBeurt?.id === midden[2]
-  );
-  check(
-    '...en de winnaar springt gewoon binnen de rest',
-    (await volgorde()).join() === [midden[0], midden[1], midden[4], midden[3]].join(),
-    `volgorde: ${(await volgorde()).join(', ')}`
-  );
-
-  // Beschermregel: twee rondes stilstaan maakt onpasseerbaar.
-  const bes = await nieuweRij(6, 'bes');
-  await stemOp(bes[3], 'kiezer-1');
-  await startNummer(bes[0]); // bes[2] blijft op #3 staan -> stilstand 1 na de volgende ronde
-  await stemOp(bes[4], 'kiezer-1');
-  await startNummer(bes[1]);
-  await stemOp(bes[5], 'kiezer-1');
-  await startNummer(bes[3]);
-
-  const naDrieRondes = await api('/api/queue');
-  const beschermd = naDrieRondes.data.wachtrij.find((e) => e.id === bes[2]);
-  check(
-    `na ${BESCHERMING_NA_RONDES} rondes stilstand is een aanvraag beschermd`,
-    beschermd?.isBeschermd === true,
-    JSON.stringify(naDrieRondes.data.wachtrij.map((e) => [e.id, e.isBeschermd]))
-  );
-
-  const inhaler = await vraagAan('bes', 6);
-  await stemOp(inhaler, 'kiezer-1');
-  const rondeBlok = await startNummer(bes[4]);
-  check(
-    'de rondewinnaar kan een beschermde aanvraag niet passeren',
-    rondeBlok.data?.start?.winnaar?.id === inhaler &&
-      rondeBlok.data.start.winnaar.gesprongen === false,
-    JSON.stringify(rondeBlok.data?.start?.winnaar)
-  );
-  check(
-    '...en blijft er dus netjes onder staan',
-    (await volgorde()).join() === [bes[5], bes[2], inhaler].join(),
-    `volgorde: ${(await volgorde()).join(', ')}`
-  );
-  check(
-    'zodra de beschermde aanvraag opschuift vervalt de bescherming',
-    (await api('/api/queue')).data.wachtrij.find((e) => e.id === bes[2])?.isBeschermd === false
-  );
-
+  check('host mag een nummer midden uit de rij starten', (await api('/api/queue')).data?.nuAanDeBeurt?.id === midden[2]);
+  check('...en de rest blijft op volgorde', (await volgorde()).join() === [midden[0], midden[1], midden[3], midden[4]].join(), `volgorde: ${(await volgorde()).join(', ')}`);
+  await startNummer(midden[0]);
+  const naTwee = await api('/api/queue');
+  check('de volgende start zet het vorige nummer op klaar', naTwee.data?.nuAanDeBeurt?.id === midden[0] && !naTwee.data.wachtrij.some((e) => e.id === midden[2]));
+  await api('/api/host', { method: 'POST', body: { actie: 'skip', requestId: midden[1] }, pin: PIN });
+  check('skip zet een nummer achteraan', (await volgorde()).join() === [midden[3], midden[4], midden[1]].join(), `volgorde: ${(await volgorde()).join(', ')}`);
+  // Een aanvraag blijft staan, hoe lang ook: geen check-in, geen pauze.
+  const oud = Date.now() - 40 * 60_000;
+  for (const id of [midden[3], midden[4]]) await redisCmd(['hset', sk(`req:${id}`), 'createdAt', String(oud)]);
+  await snapshotWeg();
+  await wacht(3200);
+  const naLang = await api(`/api/queue?deviceId=mid-dev-3`);
+  check('een aanvraag van 40 minuten oud staat er nog gewoon, zonder vraag', naLang.data?.wachtrij?.length === 3 && naLang.data.wachtrij[0].id === midden[3] && !('checkin' in naLang.data));
   for (const entry of (await api('/api/queue')).data?.wachtrij ?? []) {
     await api('/api/host', {
       method: 'POST',
@@ -685,7 +539,7 @@ async function testen() {
       pin: PIN,
     });
   }
-  check('de wachtrij is opgeruimd na de stemrondes', (await volgorde()).length === 0);
+  check('de wachtrij is opgeruimd na de volgordetest', (await volgorde()).length === 0);
 
   // --- Aanvraaglimiet bij een drukke rij ------------------------------------
   console.log('\nAanvraaglimiet');
@@ -755,117 +609,10 @@ async function testen() {
   }
   check('de wachtrij is opgeruimd na de limiettest', (await volgorde()).length === 0);
 
-  // --- Check-in die verloopt ----------------------------------------------
-  // Vereist directe toegang tot de datastore om de klok terug te zetten;
-  // met een echte Upstash-database slaan we dit over.
   if (EXTERN) {
-    console.log('\nCheck-in-verval — overgeslagen (draait alleen tegen fake-upstash)');
+    console.log('\nVerrassingskeuze: overgeslagen tegen een echte server (vult de rij tot 30)');
     return;
   }
-  console.log('\nCheck-in die verloopt');
-
-  const drie = (await api('/api/songs?q=love')).data.resultaten.slice(0, 3);
-  const ids = [];
-  for (const [i, song] of drie.entries()) {
-    const res = await api('/api/request', {
-      method: 'POST',
-      body: { songId: song.id, zangerNaam: `Zanger ${i}`, deviceId: `dev-${i}` },
-    });
-    ids.push(res.data.id);
-  }
-
-  // De rij staat op volgorde van binnenkomst, dus de derde aanvraag staat op #3
-  // en is daarmee niet vrijgesteld van de check-in.
-  const doelId = ids[2];
-  const opgesteld = await api('/api/queue');
-  check(
-    'testnummer staat op #3',
-    opgesteld.data?.wachtrij?.[2]?.id === doelId,
-    `#3 is ${opgesteld.data?.wachtrij?.[2]?.id}, verwacht ${doelId}`
-  );
-
-  /**
-   * Zet de aanvraag zoveel minuten terug in de tijd. Omdat we buiten de app om
-   * schrijven, moeten we de servercache (SNAPSHOT_TTL_MS) laten verlopen.
-   */
-  async function tijdreis(minuten, id = doelId) {
-    const toen = Date.now() - minuten * 60_000;
-    await redisCmd(['hset', sk(`req:${id}`), 'createdAt', String(toen), 'lastConfirmedAt', String(toen)]);
-    await snapshotWeg();
-    await wacht(3200);
-  }
-
-  await tijdreis(16);
-  const metPrompt = await api('/api/queue?deviceId=dev-2');
-  check(
-    'na 16 minuten verschijnt de check-in-vraag',
-    metPrompt.data?.checkin?.requestId === doelId,
-    JSON.stringify(metPrompt.data?.checkin)
-  );
-  check('de vraag noemt de juiste positie', metPrompt.data?.checkin?.positie === 3);
-
-  const anderDevice = await api('/api/queue?deviceId=dev-0');
-  check('een ander device krijgt de vraag niet', anderDevice.data?.checkin === null);
-
-  check(
-    'bevestigen laat het nummer in de rij staan',
-    (await api('/api/checkin', { method: 'POST', body: { requestId: doelId, deviceId: 'dev-2' } }))
-      .status === 200 && (await api('/api/queue')).data?.wachtrij?.length === 3
-  );
-
-  await tijdreis(21);
-  const gepauzeerd = await api('/api/queue?deviceId=dev-2');
-  check('na 21 minuten zonder bevestiging wordt het nummer gepauzeerd', gepauzeerd.data?.wachtrij?.length === 2);
-  check('het gepauzeerde nummer staat apart', gepauzeerd.data?.gepauzeerd?.[0]?.id === doelId);
-
-  const hervat = await api('/api/checkin', {
-    method: 'POST',
-    body: { actie: 'hervat', requestId: doelId, deviceId: 'dev-2' },
-  });
-  check('"ik ben er weer" zet het nummer terug in de rij', hervat.status === 200);
-  const naHervat = await api('/api/queue');
-  check('de rij telt weer drie nummers', naHervat.data?.wachtrij?.length === 3);
-
-  await tijdreis(21);
-  const tweedeKeer = await api('/api/queue?deviceId=dev-2');
-  check(
-    'tweede gemiste check-in laat de aanvraag definitief vervallen',
-    tweedeKeer.data?.wachtrij?.length === 2 && tweedeKeer.data?.gepauzeerd?.length === 0,
-    JSON.stringify({
-      rij: tweedeKeer.data?.wachtrij?.length,
-      gepauzeerd: tweedeKeer.data?.gepauzeerd?.length,
-    })
-  );
-
-  // --- Check-in: "nee, haal ons maar uit de lijst" -------------------------
-  console.log('\nCheck-in: nee-knop');
-
-  const neeSong = (await api('/api/songs?q=goodbye')).data.resultaten[0];
-  const neeAanvraag = await api('/api/request', {
-    method: 'POST',
-    body: { songId: neeSong.id, zangerNaam: 'Weggaander', deviceId: 'dev-nee' },
-  });
-  check('extra aanvraag voor de nee-test lukt', neeAanvraag.status === 200);
-  const neeId = neeAanvraag.data?.id;
-
-  await tijdreis(16, neeId);
-  const metVraag = await api('/api/queue?deviceId=dev-nee');
-  check(
-    'check-in-vraag staat open',
-    metVraag.data?.checkin?.requestId === neeId,
-    JSON.stringify(metVraag.data?.checkin)
-  );
-
-  const nee = await api('/api/request', {
-    method: 'DELETE',
-    body: { requestId: neeId, deviceId: 'dev-nee' },
-  });
-  check('"nee" haalt de aanvraag direct uit de lijst', nee.status === 200);
-
-  const naNee = await api('/api/queue?deviceId=dev-nee');
-  check('...het nummer staat niet meer in de rij', !naNee.data?.wachtrij?.some((e) => e.id === neeId));
-  check('...en staat ook niet gepauzeerd', naNee.data?.gepauzeerd?.length === 0);
-  check('...de check-in-vraag is weg', naNee.data?.checkin === null);
 
   // --- Verrassingskeuze van de host ----------------------------------------
   console.log('\nVerrassingskeuze');
@@ -891,17 +638,6 @@ async function testen() {
 
   const topVoor = vol.data.wachtrij.slice(0, VERRASSING_BESCHERMDE_TOP);
 
-  // Een paar stemmen uitbrengen: de verrassingskeuze mag die niet aanraken.
-  await api('/api/vote', { method: 'POST', body: { requestId: vol.data.wachtrij[8].id, deviceId: 'kiezer-v1' } });
-  await api('/api/vote', { method: 'POST', body: { requestId: vol.data.wachtrij[8].id, deviceId: 'kiezer-v2' } });
-  await api('/api/vote', { method: 'POST', body: { requestId: vol.data.wachtrij[2].id, deviceId: 'kiezer-v3' } });
-  const metStemmen = await api('/api/queue');
-  const stemmenVoor = Object.fromEntries(metStemmen.data.wachtrij.map((e) => [e.id, e.stemmen]));
-  check(
-    'er staan stemmen open voor de verrassingstest',
-    Object.values(stemmenVoor).reduce((a, b) => a + b, 0) === 3
-  );
-
   const verrassing = await api('/api/host', {
     method: 'POST',
     body: { actie: 'verrassing' },
@@ -919,11 +655,6 @@ async function testen() {
 
   const naVerrassing = await api('/api/queue');
   check(
-    'de lopende ronde loopt gewoon door',
-    naVerrassing.data.ronde === metStemmen.data.ronde,
-    `ronde ${metStemmen.data.ronde} -> ${naVerrassing.data.ronde}`
-  );
-  check(
     'het gekozen nummer staat nu op #1',
     naVerrassing.data?.wachtrij?.[0]?.id === gekozenId,
     `#1 is ${naVerrassing.data?.wachtrij?.[0]?.id}, verwacht ${gekozenId}`
@@ -935,13 +666,8 @@ async function testen() {
   );
 
   check(
-    'geen enkele stem is aangeraakt',
-    naVerrassing.data.wachtrij.every((e) => stemmenVoor[e.id] === e.stemmen),
-    JSON.stringify(
-      naVerrassing.data.wachtrij
-        .filter((e) => stemmenVoor[e.id] !== undefined && stemmenVoor[e.id] !== e.stemmen)
-        .map((e) => `${e.id}: ${stemmenVoor[e.id]} -> ${e.stemmen}`)
-    )
+    'de top blijft in dezelfde volgorde staan',
+    naVerrassing.data.wachtrij.slice(1, VERRASSING_BESCHERMDE_TOP + 1).map((e) => e.id).join() === topVoor.map((e) => e.id).join()
   );
   check(
     'de rij is niet korter geworden',
@@ -1041,6 +767,20 @@ async function faseDertien(show) {
   check('een score boven 10.000 wordt geweigerd', (await host({ actie: 'uitslag', requestId: ids[0], score: 12000 })).status === 400);
   check('een score die geen getal is wordt geweigerd', (await host({ actie: 'uitslag', requestId: ids[0], score: 'veel' })).status === 400);
 
+  console.log('\nScore met opbouw en de bonus van de jury (fase 13.8)');
+  const metOpbouw = await host({ actie: 'uitslag', requestId: ids[0], score: 7700, labels: ['Toonvast'], opbouw: { meter: 7200, klassieker: 500, herhaling: 0, bonus: 0 } });
+  check('een score met opbouw wordt bewaard', metOpbouw.status === 200 && metOpbouw.data?.uitslag?.opbouw?.klassieker === 500, JSON.stringify(metOpbouw.data));
+  const opTelefoon = (await ah('/api/queue?deviceId=dev-score-0')).data?.mijnUitslagen?.[0];
+  check('de zanger ziet de eindscore met de opbouw', opTelefoon?.score === 7700 && opTelefoon?.opbouw?.meter === 7200 && opTelefoon?.opbouw?.klassieker === 500);
+  const metBonus = await host({ actie: 'uitslag', requestId: ids[0], score: 7950, labels: ['Toonvast'], opbouw: { meter: 7200, klassieker: 500, herhaling: 0, bonus: 250 } });
+  check('de bonus van de jury komt als nieuwe uitslag binnen en vervangt de vorige', metBonus.status === 200 && (await ah('/api/leaderboard')).data?.leaderboard?.[0]?.opbouw?.bonus === 250);
+  check('...met de nieuwe eindscore op de telefoon', (await ah('/api/queue?deviceId=dev-score-0')).data?.mijnUitslagen?.[0]?.score === 7950);
+  const herhaling = await host({ actie: 'uitslag', requestId: ids[0], score: 6900, labels: [], opbouw: { meter: 7200, klassieker: 0, herhaling: -300, bonus: 0 } });
+  check('een aftrek voor een herhaling is negatief in de opbouw', herhaling.status === 200 && herhaling.data?.uitslag?.opbouw?.herhaling === -300);
+  const rommelOpbouw = await host({ actie: 'uitslag', requestId: ids[0], score: 7200, labels: ['Toonvast', 'Stemmingmaker'], opbouw: 'onzin' });
+  check('een onbruikbare opbouw wordt genegeerd (null), de score blijft', rommelOpbouw.status === 200 && rommelOpbouw.data?.uitslag?.opbouw === null && rommelOpbouw.data?.uitslag?.score === 7200);
+  check('zonder opbouw is de opbouw null', (await host({ actie: 'uitslag', requestId: ids[0], score: 7200, labels: ['Toonvast', 'Stemmingmaker'] })).data?.uitslag?.opbouw === null);
+
   const klaar = await host({ actie: 'klaar' });
   check('klaar haalt het spelende nummer van het podium', klaar.status === 200 && klaar.data?.klaar?.id === ids[0]);
   const naKlaar = (await ah('/api/queue?deviceId=dev-score-0')).data;
@@ -1092,6 +832,10 @@ async function faseDertien(show) {
   check('...uit het leaderboard', naWeg?.leaderboard?.length === 2 && !naWeg.leaderboard.some((u) => u.id === ids[2]));
   check('...en van de telefoon van die zanger', naWeg?.mijnUitslagen?.length === 0);
   check('...de andere scores blijven', ((await ah('/api/leaderboard')).data?.leaderboard ?? []).map((u) => u.id).join() === [ids[1], ids[0]].join());
+  // Na het zingen mag een gast hetzelfde nummer nogmaals aanvragen (de Knal-meter rekent dan de aftrek).
+  const nogEens = await ah('/api/request', { method: 'POST', body: { songId: songs[0].id, zangerNaam: 'Zanger 9', deviceId: 'dev-score-9' } });
+  check('een nummer dat al gezongen is, mag opnieuw aangevraagd worden', nogEens.status === 200, JSON.stringify(nogEens.data));
+  await host({ actie: 'verwijder', requestId: nogEens.data?.id });
   check('nogmaals weghalen doet niets', (await host({ actie: 'uitslagweg', requestId: ids[2] })).data?.weg === false);
   check('weghalen zonder token of pin mag niet', (await ah('/api/host', { method: 'POST', body: { actie: 'uitslagweg', requestId: ids[0] } })).status === 401);
 
